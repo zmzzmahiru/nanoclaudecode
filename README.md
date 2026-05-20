@@ -113,6 +113,39 @@ npm run dev -- "Find where the OpenAI-compatible provider is implemented"
 npm run dev -- "Use glob to list TypeScript source files, then summarize the project layout"
 ```
 
+## v3 Permission-Controlled Bash
+
+NanoClaude v3 adds a `bash` tool for development commands. Before any command runs, NanoClaude prints the command and asks for approval with `y/N`.
+
+```json
+{
+  "type": "tool_call",
+  "tool": "bash",
+  "args": {
+    "command": "npm run build",
+    "cwd": "."
+  }
+}
+```
+
+If the command is rejected, the tool returns:
+
+```json
+{
+  "success": false,
+  "output": "",
+  "error": "Command rejected by user."
+}
+```
+
+The tool keeps `cwd` inside the project root, rejects obvious high-risk commands, times out long-running commands, and caps stdout/stderr before returning results to the model.
+
+Example:
+
+```bash
+npm run dev -- "Run the build and explain any TypeScript errors"
+```
+
 ## Project Structure
 
 ```text
@@ -124,8 +157,9 @@ src/
   tools/list-files.ts
   tools/glob.ts
   tools/grep.ts
+  tools/bash.ts
   tools/index.ts
-  permissions/
+  permissions/confirm.ts
 ```
 
 ## Roadmap

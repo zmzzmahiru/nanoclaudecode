@@ -30,12 +30,14 @@ Or request a tool call as:
 {"type":"tool_call","tool":"list_files","args":{"path":"."}}
 {"type":"tool_call","tool":"glob","args":{"pattern":"src/**/*.ts"}}
 {"type":"tool_call","tool":"grep","args":{"pattern":"OpenAICompatibleProvider","path":"src"}}
+{"type":"tool_call","tool":"bash","args":{"command":"npm run build","cwd":"."}}
 
 Available tools:
 - read_file: read a UTF-8 text file inside the project root.
 - list_files: list files and directories directly inside a project directory.
 - glob: find files by glob pattern inside the project root. Ignores node_modules and dist.
-- grep: search text files under a path for a string pattern. Ignores node_modules and dist.`;
+- grep: search text files under a path for a string pattern. Ignores node_modules and dist.
+- bash: run a development command from a project directory after explicit user approval. Avoid destructive or high-risk commands.`;
 
 function parseModelResponse(content: string): ModelResponse {
   const trimmed = content.trim();

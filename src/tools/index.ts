@@ -1,3 +1,4 @@
+import { bashTool, type BashArgs } from "./bash.js";
 import { globTool, type GlobArgs } from "./glob.js";
 import { grepTool, type GrepArgs } from "./grep.js";
 import { listFilesTool, type ListFilesArgs } from "./list-files.js";
@@ -8,9 +9,9 @@ import {
   type ToolResult,
 } from "./read-file.js";
 
-export type ToolName = "read_file" | "list_files" | "glob" | "grep";
+export type ToolName = "read_file" | "list_files" | "glob" | "grep" | "bash";
 
-export type ToolArgs = ReadFileArgs | ListFilesArgs | GlobArgs | GrepArgs;
+export type ToolArgs = ReadFileArgs | ListFilesArgs | GlobArgs | GrepArgs | BashArgs;
 
 export type ToolHandler = (
   args: ToolArgs,
@@ -43,6 +44,11 @@ export const toolRegistry: Record<ToolName, ToolDefinition> = {
     name: "grep",
     description: "Search text files under a path for a string pattern.",
     run: (args, context) => grepTool(args as GrepArgs, context),
+  },
+  bash: {
+    name: "bash",
+    description: "Run a development command after explicit user approval.",
+    run: (args, context) => bashTool(args as BashArgs, context),
   },
 };
 

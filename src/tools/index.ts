@@ -1,3 +1,5 @@
+import { globTool, type GlobArgs } from "./glob.js";
+import { grepTool, type GrepArgs } from "./grep.js";
 import { listFilesTool, type ListFilesArgs } from "./list-files.js";
 import {
   readFileTool,
@@ -6,9 +8,9 @@ import {
   type ToolResult,
 } from "./read-file.js";
 
-export type ToolName = "read_file" | "list_files";
+export type ToolName = "read_file" | "list_files" | "glob" | "grep";
 
-export type ToolArgs = ReadFileArgs | ListFilesArgs;
+export type ToolArgs = ReadFileArgs | ListFilesArgs | GlobArgs | GrepArgs;
 
 export type ToolHandler = (
   args: ToolArgs,
@@ -32,14 +34,28 @@ export const toolRegistry: Record<ToolName, ToolDefinition> = {
     description: "List files and directories directly inside a project directory.",
     run: (args, context) => listFilesTool(args as ListFilesArgs, context),
   },
+  glob: {
+    name: "glob",
+    description: "Find files by glob pattern inside the project root.",
+    run: (args, context) => globTool(args as GlobArgs, context),
+  },
+  grep: {
+    name: "grep",
+    description: "Search text files under a path for a string pattern.",
+    run: (args, context) => grepTool(args as GrepArgs, context),
+  },
 };
+
+function isToolName(name: string): name is ToolName {
+  return name in toolRegistry;
+}
 
 export async function runTool(
   name: string,
   args: unknown,
   context: ToolContext,
 ): Promise<ToolResult> {
-  if (name !== "read_file" && name !== "list_files") {
+  if (!isToolName(name)) {
     return {
       success: false,
       output: "",
@@ -52,4 +68,3 @@ export async function runTool(
 }
 
 export type { ToolContext, ToolResult };
-

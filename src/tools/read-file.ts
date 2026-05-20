@@ -1,5 +1,6 @@
-import { readFile, realpath } from "node:fs/promises";
-import path from "node:path";
+import { readFile } from "node:fs/promises";
+
+import { resolveInsideProject } from "./path-safety.js";
 
 export interface ToolResult {
   success: boolean;
@@ -13,20 +14,6 @@ export interface ToolContext {
 
 export interface ReadFileArgs {
   path: string;
-}
-
-async function resolveInsideProject(
-  projectRoot: string,
-  requestedPath: string,
-): Promise<string> {
-  const root = await realpath(projectRoot);
-  const target = await realpath(path.resolve(root, requestedPath));
-
-  if (target !== root && !target.startsWith(`${root}${path.sep}`)) {
-    throw new Error(`Path is outside the project root: ${requestedPath}`);
-  }
-
-  return target;
 }
 
 export async function readFileTool(

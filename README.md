@@ -75,6 +75,44 @@ Example:
 npm run dev -- "List the project files, then summarize what this project does"
 ```
 
+## v2 Codebase Search
+
+NanoClaude v2 adds codebase search tools so the agent can explore before reading specific files.
+
+Find files with `glob`:
+
+```json
+{
+  "type": "tool_call",
+  "tool": "glob",
+  "args": {
+    "pattern": "src/**/*.ts"
+  }
+}
+```
+
+Search text files with `grep`:
+
+```json
+{
+  "type": "tool_call",
+  "tool": "grep",
+  "args": {
+    "pattern": "OpenAICompatibleProvider",
+    "path": "src"
+  }
+}
+```
+
+Both tools stay inside the project root, ignore `node_modules` and `dist` by default, and return `{ success, output, error }`.
+
+Examples:
+
+```bash
+npm run dev -- "Find where the OpenAI-compatible provider is implemented"
+npm run dev -- "Use glob to list TypeScript source files, then summarize the project layout"
+```
+
 ## Project Structure
 
 ```text
@@ -84,6 +122,8 @@ src/
   agent/loop.ts
   tools/read-file.ts
   tools/list-files.ts
+  tools/glob.ts
+  tools/grep.ts
   tools/index.ts
   permissions/
 ```

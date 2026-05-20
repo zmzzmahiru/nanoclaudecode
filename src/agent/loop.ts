@@ -1,5 +1,13 @@
 import type { LLMMessage, LLMProvider } from "../llm/openai-compatible.js";
 import { loadProjectRules } from "./project-rules.js";
+import {
+  createSessionTrace,
+  recordTodoEvent,
+  recordToolCall,
+  recordToolResult,
+  saveSessionTrace,
+  type SessionTrace,
+} from "./session-trace.js";
 import { runTool } from "../tools/index.js";
 
 export interface AgentLoopInput {
@@ -216,11 +224,16 @@ function nearIterationLimitMessage(remainingIterations: number): string {
   });
 }
 
-function applyTodoList(todos: Todo[], nextTodos: Todo[]): Todo[] {
+function applyTodoList(
+  todos: Todo[],
+  nextTodos: Todo[],
+  trace: SessionTrace,
+): Todo[] {
   todos.splice(0, todos.length, ...nextTodos);
 
   for (const todo of todos) {
     printTodo(todo);
+    recordTodoEvent(trace, todo);
   }
 
   return todos;
@@ -229,6 +242,7 @@ function applyTodoList(todos: Todo[], nextTodos: Todo[]): Todo[] {
 function applyTodoUpdate(
   todos: Todo[],
   update: Extract<ModelResponse, { type: "todo_update" }>,
+  trace: SessionTrace,
 ): Todo[] {
   const existingTodo = todos.find((todo) => todo.id === update.id);
 
@@ -240,6 +254,7 @@ function applyTodoUpdate(
     };
     todos.push(newTodo);
     printTodo(newTodo);
+    recordTodoEvent(trace, newTodo);
     return todos;
   }
 
@@ -248,6 +263,7 @@ function applyTodoUpdate(
     existingTodo.content = update.content;
   }
   printTodo(existingTodo);
+  recordTodoEvent(trace, existingTodo);
 
   return todos;
 }
@@ -259,6 +275,16 @@ export async function runAgent(input: AgentLoopInput): Promise<string> {
   if (projectRules) {
     console.log(`[rules] loaded ${projectRules.fileName}`);
   }
+  const trace = createSessionTrace(
+    projectRules
+      ? {
+          userTask: input.task,
+          loadedRulesFile: projectRules.fileName,
+        }
+      : {
+          userTask: input.task,
+        },
+  );
 
   const todos: Todo[] = [];
   const messages: LLMMessage[] = [
@@ -272,73 +298,96 @@ export async function runAgent(input: AgentLoopInput): Promise<string> {
     },
   ];
 
-  for (let iteration = 0; iteration < maxIterations; iteration += 1) {
-    const remainingIterations = maxIterations - iteration;
-    if (remainingIterations === NEAR_ITERATION_LIMIT_REMAINING) {
+  try {
+    for (let iteration = 0; iteration < maxIterations; iteration += 1) {
+      const remainingIterations = maxIterations - iteration;
+      if (remainingIterations === NEAR_ITERATION_LIMIT_REMAINING) {
+        messages.push({
+          role: "user",
+          content: nearIterationLimitMessage(remainingIterations),
+        });
+      }
+
+      const content = await input.llm.complete(messages);
       messages.push({
-        role: "user",
-        content: nearIterationLimitMessage(remainingIterations),
+        role: "assistant",
+        content,
       });
-    }
 
-    const content = await input.llm.complete(messages);
-    messages.push({
-      role: "assistant",
-      content,
-    });
+      let response: ModelResponse;
+      try {
+        response = parseModelResponse(content);
+      } catch (error: unknown) {
+        messages.push({
+          role: "user",
+          content: JSON.stringify({
+            type: "error",
+            error:
+              error instanceof Error
+                ? error.message
+                : "Could not parse model response as JSON.",
+          }),
+        });
+        continue;
+      }
 
-    let response: ModelResponse;
-    try {
-      response = parseModelResponse(content);
-    } catch (error: unknown) {
+      if (response.type === "final") {
+        const tracePath = await saveSessionTrace(projectRoot, trace, {
+          status: "success",
+          finalAnswer: response.content,
+        });
+        console.log(`[session] saved ${tracePath}`);
+        return response.content;
+      }
+
+      if (response.type === "todo_list") {
+        applyTodoList(todos, response.todos, trace);
+        messages.push({
+          role: "user",
+          content: todoStateMessage(todos),
+        });
+        continue;
+      }
+
+      if (response.type === "todo_update") {
+        applyTodoUpdate(todos, response, trace);
+        messages.push({
+          role: "user",
+          content: todoStateMessage(todos),
+        });
+        continue;
+      }
+
+      console.log(`[tool_call] ${response.tool} ${formatToolArgs(response.args)}`);
+      recordToolCall(trace, response.tool, response.args);
+      const result = await runTool(response.tool, response.args, { projectRoot });
+      recordToolResult(trace, response.tool, response.args, result);
+      console.log(`[tool_result] success=${result.success}`);
+
       messages.push({
         role: "user",
         content: JSON.stringify({
-          type: "error",
-          error:
-            error instanceof Error
-              ? error.message
-              : "Could not parse model response as JSON.",
+          type: "tool_result",
+          tool: response.tool,
+          result,
         }),
       });
-      continue;
     }
 
-    if (response.type === "final") {
-      return response.content;
-    }
-
-    if (response.type === "todo_list") {
-      applyTodoList(todos, response.todos);
-      messages.push({
-        role: "user",
-        content: todoStateMessage(todos),
-      });
-      continue;
-    }
-
-    if (response.type === "todo_update") {
-      applyTodoUpdate(todos, response);
-      messages.push({
-        role: "user",
-        content: todoStateMessage(todos),
-      });
-      continue;
-    }
-
-    console.log(`[tool_call] ${response.tool} ${formatToolArgs(response.args)}`);
-    const result = await runTool(response.tool, response.args, { projectRoot });
-    console.log(`[tool_result] success=${result.success}`);
-
-    messages.push({
-      role: "user",
-      content: JSON.stringify({
-        type: "tool_result",
-        tool: response.tool,
-        result,
-      }),
+    const stoppedMessage = `Stopped after ${maxIterations} iterations without a final answer.`;
+    const tracePath = await saveSessionTrace(projectRoot, trace, {
+      status: "stopped",
+      finalAnswer: stoppedMessage,
     });
+    console.log(`[session] saved ${tracePath}`);
+    return stoppedMessage;
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    const tracePath = await saveSessionTrace(projectRoot, trace, {
+      status: "error",
+      error: message,
+    });
+    console.log(`[session] saved ${tracePath}`);
+    throw error;
   }
-
-  return `Stopped after ${maxIterations} iterations without a final answer.`;
 }

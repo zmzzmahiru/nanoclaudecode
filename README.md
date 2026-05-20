@@ -6,7 +6,7 @@ This first version is intentionally small: it provides a Node.js + TypeScript pr
 
 ## Current Status
 
-NanoClaude is currently at **v6 (Project Rules)**, implementing a full-featured agent loop with:
+NanoClaude is currently at **v7 (Session Trace Logging)**, implementing a full-featured agent loop with:
 
 - OpenAI-compatible LLM provider support (including DeepSeek, etc.)
 - Read-only filesystem tools: `read_file`, `list_files`, `glob`, `grep`
@@ -14,6 +14,7 @@ NanoClaude is currently at **v6 (Project Rules)**, implementing a full-featured 
 - Safe file editing with diff preview (`edit_file` tool)
 - In-memory todo list for complex multi-step tasks (`todo_list`, `todo_update`)
 - Project-level markdown rules loaded from `NANOCLAUDE.md`, `AGENTS.md`, or `CLAUDE.md`
+- Auditable JSON session traces saved under `.nanoclaude/sessions`
 
 The project builds successfully and can run tasks via the CLI. Future work includes adding richer conversation state, tracing, tests, and a packaged CLI.
 
@@ -286,6 +287,34 @@ Example:
 npm run dev -- "Follow the project rules and add a small README update"
 ```
 
+## v7 Session Trace Logging
+
+NanoClaude v7 saves an auditable JSON trace for each agent run in `.nanoclaude/sessions`.
+
+Each session file includes:
+
+- `sessionId`, `startedAt`, `endedAt`, and `status`
+- the user task
+- the loaded rules file, when present
+- todo events
+- tool calls
+- capped/summarized tool results
+- the final answer, or error information
+
+The trace logger avoids storing huge tool outputs, redacts common secret-looking values, and does not intentionally store `.env` contents or API keys.
+
+At the end of a run, the CLI prints:
+
+```text
+[session] saved .nanoclaude/sessions/<id>.json
+```
+
+Example:
+
+```bash
+npm run dev -- "Inspect the project and explain what changed recently"
+```
+
 ## Project Structure
 
 ```text
@@ -294,6 +323,7 @@ src/
   llm/openai-compatible.ts
   agent/loop.ts
   agent/project-rules.ts
+  agent/session-trace.ts
   tools/read-file.ts
   tools/list-files.ts
   tools/glob.ts

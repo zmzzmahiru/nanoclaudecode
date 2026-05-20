@@ -6,13 +6,14 @@ This first version is intentionally small: it provides a Node.js + TypeScript pr
 
 ## Current Status
 
-NanoClaude is currently at **v5 (Plan Mode)**, implementing a full-featured agent loop with:
+NanoClaude is currently at **v6 (Project Rules)**, implementing a full-featured agent loop with:
 
 - OpenAI-compatible LLM provider support (including DeepSeek, etc.)
 - Read-only filesystem tools: `read_file`, `list_files`, `glob`, `grep`
 - Permission-controlled bash execution (`bash` tool)
 - Safe file editing with diff preview (`edit_file` tool)
 - In-memory todo list for complex multi-step tasks (`todo_list`, `todo_update`)
+- Project-level markdown rules loaded from `NANOCLAUDE.md`, `AGENTS.md`, or `CLAUDE.md`
 
 The project builds successfully and can run tasks via the CLI. Future work includes adding richer conversation state, tracing, tests, and a packaged CLI.
 
@@ -87,7 +88,7 @@ Or request one read-only tool call:
 }
 ```
 
-NanoClaude executes the tool, appends a JSON tool result back into the conversation, and continues until the model returns `type: "final"` or the loop reaches the iteration limit.
+NanoClaude executes the tool, appends a JSON tool result back into the conversation, and continues until the model returns `type: "final"` or the loop reaches the iteration limit (default: 20 iterations, with a warning injected 3 iterations before the limit).
 
 Example:
 
@@ -255,6 +256,36 @@ Example:
 npm run dev -- "Add a new tool, update docs, and run the build"
 ```
 
+## v6 Project Rules
+
+NanoClaude v6 loads project-level rules from markdown files in the project root. It checks files in this priority order and loads only the first match:
+
+1. `NANOCLAUDE.md`
+2. `AGENTS.md`
+3. `CLAUDE.md`
+
+Loaded rule content is capped before being injected into the system prompt. When rules are found, the CLI prints:
+
+```text
+[rules] loaded NANOCLAUDE.md
+```
+
+Example `NANOCLAUDE.md`:
+
+```markdown
+# Project Rules
+
+- Keep changes small and readable.
+- Run npm run build after code changes.
+- Ask before running commands or editing files.
+```
+
+Example:
+
+```bash
+npm run dev -- "Follow the project rules and add a small README update"
+```
+
 ## Project Structure
 
 ```text
@@ -262,6 +293,7 @@ src/
   index.ts
   llm/openai-compatible.ts
   agent/loop.ts
+  agent/project-rules.ts
   tools/read-file.ts
   tools/list-files.ts
   tools/glob.ts

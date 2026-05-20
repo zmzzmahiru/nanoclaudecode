@@ -1,4 +1,5 @@
 import type { LLMMessage, LLMProvider } from "../llm/openai-compatible.js";
+import { loadProjectRules } from "./project-rules.js";
 import { runTool } from "../tools/index.js";
 
 export interface AgentLoopInput {
@@ -71,6 +72,17 @@ Available tools:
 - grep: search text files under a path for a string pattern. Ignores node_modules and dist.
 - bash: run a development command from a project directory after explicit user approval. Avoid destructive or high-risk commands.
 - edit_file: propose a replace or overwrite edit, show a unified diff, and write only after explicit user approval.`;
+
+function buildSystemPrompt(rules: Awaited<ReturnType<typeof loadProjectRules>>): string {
+  if (!rules) {
+    return SYSTEM_PROMPT;
+  }
+
+  return `${SYSTEM_PROMPT}
+
+Project rules loaded from ${rules.fileName}:
+${rules.content}`;
+}
 
 function isTodoStatus(value: unknown): value is TodoStatus {
   return value === "pending" || value === "in_progress" || value === "done";
@@ -243,11 +255,16 @@ function applyTodoUpdate(
 export async function runAgent(input: AgentLoopInput): Promise<string> {
   const maxIterations = input.maxIterations ?? MAX_AGENT_ITERATIONS;
   const projectRoot = input.projectRoot ?? process.cwd();
+  const projectRules = await loadProjectRules(projectRoot);
+  if (projectRules) {
+    console.log(`[rules] loaded ${projectRules.fileName}`);
+  }
+
   const todos: Todo[] = [];
   const messages: LLMMessage[] = [
     {
       role: "system",
-      content: SYSTEM_PROMPT,
+      content: buildSystemPrompt(projectRules),
     },
     {
       role: "user",

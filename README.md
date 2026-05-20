@@ -2,7 +2,7 @@
 
 NanoClaude is a lightweight AI coding agent framework written in TypeScript.
 
-This first version is intentionally small: it provides a Node.js + TypeScript project, a CLI entry point, an OpenAI-compatible LLM provider, and a minimal JSON-based agent loop with read-only filesystem tools.
+This first version is intentionally small: it provides a Node.js + TypeScript project, a CLI entry point, an OpenAI-compatible LLM provider (supporting models like OpenAI, DeepSeek, and others via compatible APIs), and a minimal JSON-based agent loop with read-only filesystem tools.
 
 ## Quick Start
 
@@ -18,12 +18,20 @@ Create a local environment file:
 cp .env.example .env
 ```
 
-Set your model provider values in `.env`:
+Set your model provider values in `.env`. For OpenAI:
 
 ```bash
 LLM_BASE_URL=https://api.openai.com/v1
 LLM_API_KEY=your_api_key_here
 LLM_MODEL=gpt-4.1-mini
+```
+
+For DeepSeek via its OpenAI-compatible API:
+
+```bash
+LLM_BASE_URL=https://api.deepseek.com/v1
+LLM_API_KEY=your_deepseek_api_key_here
+LLM_MODEL=deepseek-chat
 ```
 
 Run a task:
@@ -146,6 +154,45 @@ Example:
 npm run dev -- "Run the build and explain any TypeScript errors"
 ```
 
+## v4 Safe File Editing
+
+NanoClaude v4 adds an `edit_file` tool. It reads the original file, prepares either a targeted replacement or a full overwrite, prints a unified diff preview, and writes only after approval with `y/N`.
+
+Replace one exact text block:
+
+```json
+{
+  "type": "tool_call",
+  "tool": "edit_file",
+  "args": {
+    "path": "README.md",
+    "oldText": "old text",
+    "newText": "new text"
+  }
+}
+```
+
+Overwrite a file:
+
+```json
+{
+  "type": "tool_call",
+  "tool": "edit_file",
+  "args": {
+    "path": "README.md",
+    "content": "full new file content"
+  }
+}
+```
+
+Replacement mode fails if `oldText` is missing or appears more than once. The edit path must stay inside the project root.
+
+Example:
+
+```bash
+npm run dev -- "Update the README roadmap to mention safe file editing"
+```
+
 ## Project Structure
 
 ```text
@@ -158,8 +205,10 @@ src/
   tools/glob.ts
   tools/grep.ts
   tools/bash.ts
+  tools/edit-file.ts
   tools/index.ts
   permissions/confirm.ts
+  permissions/confirm-edit.ts
 ```
 
 ## Roadmap

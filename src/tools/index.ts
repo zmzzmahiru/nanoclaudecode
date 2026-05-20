@@ -1,4 +1,5 @@
 import { bashTool, type BashArgs } from "./bash.js";
+import { editFileTool, type EditFileArgs } from "./edit-file.js";
 import { globTool, type GlobArgs } from "./glob.js";
 import { grepTool, type GrepArgs } from "./grep.js";
 import { listFilesTool, type ListFilesArgs } from "./list-files.js";
@@ -9,9 +10,21 @@ import {
   type ToolResult,
 } from "./read-file.js";
 
-export type ToolName = "read_file" | "list_files" | "glob" | "grep" | "bash";
+export type ToolName =
+  | "read_file"
+  | "list_files"
+  | "glob"
+  | "grep"
+  | "bash"
+  | "edit_file";
 
-export type ToolArgs = ReadFileArgs | ListFilesArgs | GlobArgs | GrepArgs | BashArgs;
+export type ToolArgs =
+  | ReadFileArgs
+  | ListFilesArgs
+  | GlobArgs
+  | GrepArgs
+  | BashArgs
+  | EditFileArgs;
 
 export type ToolHandler = (
   args: ToolArgs,
@@ -49,6 +62,11 @@ export const toolRegistry: Record<ToolName, ToolDefinition> = {
     name: "bash",
     description: "Run a development command after explicit user approval.",
     run: (args, context) => bashTool(args as BashArgs, context),
+  },
+  edit_file: {
+    name: "edit_file",
+    description: "Preview and apply a file edit after explicit user approval.",
+    run: (args, context) => editFileTool(args as EditFileArgs, context),
   },
 };
 

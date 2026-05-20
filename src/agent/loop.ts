@@ -31,13 +31,16 @@ Or request a tool call as:
 {"type":"tool_call","tool":"glob","args":{"pattern":"src/**/*.ts"}}
 {"type":"tool_call","tool":"grep","args":{"pattern":"OpenAICompatibleProvider","path":"src"}}
 {"type":"tool_call","tool":"bash","args":{"command":"npm run build","cwd":"."}}
+{"type":"tool_call","tool":"edit_file","args":{"path":"README.md","oldText":"old text","newText":"new text"}}
+{"type":"tool_call","tool":"edit_file","args":{"path":"README.md","content":"full new file content"}}
 
 Available tools:
 - read_file: read a UTF-8 text file inside the project root.
 - list_files: list files and directories directly inside a project directory.
 - glob: find files by glob pattern inside the project root. Ignores node_modules and dist.
 - grep: search text files under a path for a string pattern. Ignores node_modules and dist.
-- bash: run a development command from a project directory after explicit user approval. Avoid destructive or high-risk commands.`;
+- bash: run a development command from a project directory after explicit user approval. Avoid destructive or high-risk commands.
+- edit_file: propose a replace or overwrite edit, show a unified diff, and write only after explicit user approval.`;
 
 function parseModelResponse(content: string): ModelResponse {
   const trimmed = content.trim();
@@ -67,10 +70,35 @@ function parseModelResponse(content: string): ModelResponse {
 
 function formatToolArgs(args: unknown): string {
   try {
-    return JSON.stringify(args ?? {});
+    return JSON.stringify(summarizeToolArgs(args ?? {}));
   } catch {
     return "{}";
   }
+}
+
+function summarizeToolArgs(value: unknown, key?: string): unknown {
+  if (typeof value === "string") {
+    if (key === "content" || key === "oldText" || key === "newText") {
+      return `<${value.length} chars>`;
+    }
+
+    return value.length > 240 ? `${value.slice(0, 240)}...` : value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => summarizeToolArgs(item));
+  }
+
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value).map(([entryKey, entryValue]) => [
+        entryKey,
+        summarizeToolArgs(entryValue, entryKey),
+      ]),
+    );
+  }
+
+  return value;
 }
 
 export async function runAgent(input: AgentLoopInput): Promise<string> {

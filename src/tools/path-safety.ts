@@ -20,7 +20,13 @@ export async function resolveInsideProject(
   requestedPath: string,
 ): Promise<string> {
   const root = await resolveProjectRoot(projectRoot);
-  const target = await realpath(path.resolve(root, requestedPath));
+  const candidate = path.resolve(root, requestedPath);
+
+  if (!isInsideProject(root, candidate)) {
+    throw new Error(`Path is outside the project root: ${requestedPath}`);
+  }
+
+  const target = await realpath(candidate);
 
   if (!isInsideProject(root, target)) {
     throw new Error(`Path is outside the project root: ${requestedPath}`);

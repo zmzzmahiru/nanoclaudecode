@@ -8,6 +8,14 @@ export interface AgentLoopInput {
   projectRoot?: string;
 }
 
+export type TodoStatus = "pending" | "in_progress" | "done";
+
+export interface Todo {
+  id: string;
+  content: string;
+  status: TodoStatus;
+}
+
 type ModelResponse =
   | {
       type: "final";
@@ -17,10 +25,32 @@ type ModelResponse =
       type: "tool_call";
       tool: string;
       args: unknown;
+    }
+  | {
+      type: "todo_list";
+      todos: Todo[];
+    }
+  | {
+      type: "todo_update";
+      id: string;
+      status: TodoStatus;
+      content?: string;
     };
+
+const MAX_AGENT_ITERATIONS = 20;
+const NEAR_ITERATION_LIMIT_REMAINING = 3;
 
 const SYSTEM_PROMPT = `You are NanoClaude, a minimal coding agent.
 You must respond with JSON only. Do not wrap JSON in markdown.
+
+For complex tasks, first produce a short todo list:
+{"type":"todo_list","todos":[{"id":"1","content":"Inspect project structure","status":"in_progress"},{"id":"2","content":"Make the requested change","status":"pending"},{"id":"3","content":"Run npm run build","status":"pending"}]}
+
+As you work, update progress before or after using tools:
+{"type":"todo_update","id":"1","status":"done"}
+{"type":"todo_update","id":"2","status":"in_progress"}
+
+Be concise with tool calls. Do not inspect unnecessary files. When enough information has been gathered, return a final answer.
 
 Return a final answer as:
 {"type":"final","content":"..."}
@@ -41,6 +71,32 @@ Available tools:
 - grep: search text files under a path for a string pattern. Ignores node_modules and dist.
 - bash: run a development command from a project directory after explicit user approval. Avoid destructive or high-risk commands.
 - edit_file: propose a replace or overwrite edit, show a unified diff, and write only after explicit user approval.`;
+
+function isTodoStatus(value: unknown): value is TodoStatus {
+  return value === "pending" || value === "in_progress" || value === "done";
+}
+
+function parseTodo(value: unknown): Todo {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("Todo must be an object.");
+  }
+
+  const todo = value as Partial<Todo>;
+
+  if (
+    typeof todo.id !== "string" ||
+    typeof todo.content !== "string" ||
+    !isTodoStatus(todo.status)
+  ) {
+    throw new Error("Todo must include id, content, and a valid status.");
+  }
+
+  return {
+    id: todo.id,
+    content: todo.content,
+    status: todo.status,
+  };
+}
 
 function parseModelResponse(content: string): ModelResponse {
   const trimmed = content.trim();
@@ -65,7 +121,34 @@ function parseModelResponse(content: string): ModelResponse {
     };
   }
 
-  throw new Error("Model response must be a final answer or tool call JSON object.");
+  if (parsed.type === "todo_list" && Array.isArray(parsed.todos)) {
+    return {
+      type: "todo_list",
+      todos: parsed.todos.map(parseTodo),
+    };
+  }
+
+  if (
+    parsed.type === "todo_update" &&
+    typeof parsed.id === "string" &&
+    isTodoStatus(parsed.status)
+  ) {
+    const update: Extract<ModelResponse, { type: "todo_update" }> = {
+      type: "todo_update",
+      id: parsed.id,
+      status: parsed.status,
+    };
+
+    if (typeof parsed.content === "string") {
+      update.content = parsed.content;
+    }
+
+    return update;
+  }
+
+  throw new Error(
+    "Model response must be a final answer, todo list, todo update, or tool call JSON object.",
+  );
 }
 
 function formatToolArgs(args: unknown): string {
@@ -101,9 +184,66 @@ function summarizeToolArgs(value: unknown, key?: string): unknown {
   return value;
 }
 
+function printTodo(todo: Todo): void {
+  console.log(`[todo] ${todo.status}: ${todo.content}`);
+}
+
+function todoStateMessage(todos: Todo[]): string {
+  return JSON.stringify({
+    type: "todo_state",
+    todos,
+  });
+}
+
+function nearIterationLimitMessage(remainingIterations: number): string {
+  return JSON.stringify({
+    type: "iteration_limit_warning",
+    remainingIterations,
+    instruction:
+      "You are near the iteration limit. Summarize with available information instead of continuing to inspect more files unless one final tool call is essential.",
+  });
+}
+
+function applyTodoList(todos: Todo[], nextTodos: Todo[]): Todo[] {
+  todos.splice(0, todos.length, ...nextTodos);
+
+  for (const todo of todos) {
+    printTodo(todo);
+  }
+
+  return todos;
+}
+
+function applyTodoUpdate(
+  todos: Todo[],
+  update: Extract<ModelResponse, { type: "todo_update" }>,
+): Todo[] {
+  const existingTodo = todos.find((todo) => todo.id === update.id);
+
+  if (!existingTodo) {
+    const newTodo: Todo = {
+      id: update.id,
+      content: update.content ?? `Todo ${update.id}`,
+      status: update.status,
+    };
+    todos.push(newTodo);
+    printTodo(newTodo);
+    return todos;
+  }
+
+  existingTodo.status = update.status;
+  if (update.content) {
+    existingTodo.content = update.content;
+  }
+  printTodo(existingTodo);
+
+  return todos;
+}
+
 export async function runAgent(input: AgentLoopInput): Promise<string> {
-  const maxIterations = input.maxIterations ?? 8;
+  const maxIterations = input.maxIterations ?? MAX_AGENT_ITERATIONS;
   const projectRoot = input.projectRoot ?? process.cwd();
+  const todos: Todo[] = [];
   const messages: LLMMessage[] = [
     {
       role: "system",
@@ -116,6 +256,14 @@ export async function runAgent(input: AgentLoopInput): Promise<string> {
   ];
 
   for (let iteration = 0; iteration < maxIterations; iteration += 1) {
+    const remainingIterations = maxIterations - iteration;
+    if (remainingIterations === NEAR_ITERATION_LIMIT_REMAINING) {
+      messages.push({
+        role: "user",
+        content: nearIterationLimitMessage(remainingIterations),
+      });
+    }
+
     const content = await input.llm.complete(messages);
     messages.push({
       role: "assistant",
@@ -141,6 +289,24 @@ export async function runAgent(input: AgentLoopInput): Promise<string> {
 
     if (response.type === "final") {
       return response.content;
+    }
+
+    if (response.type === "todo_list") {
+      applyTodoList(todos, response.todos);
+      messages.push({
+        role: "user",
+        content: todoStateMessage(todos),
+      });
+      continue;
+    }
+
+    if (response.type === "todo_update") {
+      applyTodoUpdate(todos, response);
+      messages.push({
+        role: "user",
+        content: todoStateMessage(todos),
+      });
+      continue;
     }
 
     console.log(`[tool_call] ${response.tool} ${formatToolArgs(response.args)}`);

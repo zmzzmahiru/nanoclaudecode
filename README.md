@@ -4,6 +4,18 @@ NanoClaude is a lightweight AI coding agent framework written in TypeScript.
 
 This first version is intentionally small: it provides a Node.js + TypeScript project, a CLI entry point, an OpenAI-compatible LLM provider (supporting models like OpenAI, DeepSeek, and others via compatible APIs), and a minimal JSON-based agent loop with read-only filesystem tools.
 
+## Current Status
+
+NanoClaude is currently at **v5 (Plan Mode)**, implementing a full-featured agent loop with:
+
+- OpenAI-compatible LLM provider support (including DeepSeek, etc.)
+- Read-only filesystem tools: `read_file`, `list_files`, `glob`, `grep`
+- Permission-controlled bash execution (`bash` tool)
+- Safe file editing with diff preview (`edit_file` tool)
+- In-memory todo list for complex multi-step tasks (`todo_list`, `todo_update`)
+
+The project builds successfully and can run tasks via the CLI. Future work includes adding richer conversation state, tracing, tests, and a packaged CLI.
+
 ## Quick Start
 
 Install dependencies:
@@ -75,7 +87,7 @@ Or request one read-only tool call:
 }
 ```
 
-NanoClaude executes the tool, appends a JSON tool result back into the conversation, and continues until the model returns `type: "final"` or the loop reaches 8 iterations.
+NanoClaude executes the tool, appends a JSON tool result back into the conversation, and continues until the model returns `type: "final"` or the loop reaches the iteration limit.
 
 Example:
 
@@ -191,6 +203,56 @@ Example:
 
 ```bash
 npm run dev -- "Update the README roadmap to mention safe file editing"
+```
+
+## v5 Plan Mode
+
+NanoClaude v5 adds an in-memory todo list for complex tasks. The model can first produce a short plan:
+
+```json
+{
+  "type": "todo_list",
+  "todos": [
+    {
+      "id": "1",
+      "content": "Inspect project structure",
+      "status": "in_progress"
+    },
+    {
+      "id": "2",
+      "content": "Make the requested change",
+      "status": "pending"
+    },
+    {
+      "id": "3",
+      "content": "Run npm run build",
+      "status": "pending"
+    }
+  ]
+}
+```
+
+As work progresses, the model can update individual todos:
+
+```json
+{
+  "type": "todo_update",
+  "id": "1",
+  "status": "done"
+}
+```
+
+Todo state is stored only for one agent run. The CLI prints progress as it changes:
+
+```text
+[todo] in_progress: Inspect project structure
+[todo] done: Run npm run build
+```
+
+Example:
+
+```bash
+npm run dev -- "Add a new tool, update docs, and run the build"
 ```
 
 ## Project Structure

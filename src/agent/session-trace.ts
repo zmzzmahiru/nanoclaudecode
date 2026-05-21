@@ -31,6 +31,8 @@ export interface ToolCallTrace {
   at: string;
   tool: string;
   args: unknown;
+  source?: "model" | "hook";
+  hookName?: string;
 }
 
 export interface ToolResultTrace {
@@ -39,6 +41,8 @@ export interface ToolResultTrace {
   success: boolean;
   output: string;
   error: string | null;
+  source?: "model" | "hook";
+  hookName?: string;
 }
 
 const TRACE_DIR = ".nanoclaude/sessions";
@@ -89,12 +93,23 @@ export function recordToolCall(
   trace: SessionTrace,
   tool: string,
   args: unknown,
+  metadata: { source?: "model" | "hook"; hookName?: string } = {},
 ): void {
-  trace.toolCalls.push({
+  const entry: ToolCallTrace = {
     at: new Date().toISOString(),
     tool,
     args: summarizeArgs(args),
-  });
+  };
+
+  if (metadata.source) {
+    entry.source = metadata.source;
+  }
+
+  if (metadata.hookName) {
+    entry.hookName = metadata.hookName;
+  }
+
+  trace.toolCalls.push(entry);
 }
 
 export function recordToolResult(
@@ -102,14 +117,25 @@ export function recordToolResult(
   tool: string,
   args: unknown,
   result: ToolResult,
+  metadata: { source?: "model" | "hook"; hookName?: string } = {},
 ): void {
-  trace.toolResults.push({
+  const entry: ToolResultTrace = {
     at: new Date().toISOString(),
     tool,
     success: result.success,
     output: summarizeToolOutput(tool, args, result.output),
     error: result.error ? capAndRedact(result.error) : null,
-  });
+  };
+
+  if (metadata.source) {
+    entry.source = metadata.source;
+  }
+
+  if (metadata.hookName) {
+    entry.hookName = metadata.hookName;
+  }
+
+  trace.toolResults.push(entry);
 }
 
 export async function saveSessionTrace(

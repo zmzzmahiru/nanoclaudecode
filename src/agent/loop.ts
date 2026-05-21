@@ -1,4 +1,5 @@
 import type { LLMMessage, LLMProvider } from "../llm/openai-compatible.js";
+import { runAfterEditHook } from "./hooks.js";
 import { loadProjectRules } from "./project-rules.js";
 import {
   createSessionTrace,
@@ -15,6 +16,8 @@ export interface AgentLoopInput {
   llm: LLMProvider;
   maxIterations?: number;
   projectRoot?: string;
+  hooksEnabled?: boolean;
+  rulesEnabled?: boolean;
 }
 
 export type TodoStatus = "pending" | "in_progress" | "done";
@@ -79,7 +82,10 @@ Available tools:
 - glob: find files by glob pattern inside the project root. Ignores node_modules and dist.
 - grep: search text files under a path for a string pattern. Ignores node_modules and dist.
 - bash: run a development command from a project directory after explicit user approval. Avoid destructive or high-risk commands.
-- edit_file: propose a replace or overwrite edit, show a unified diff, and write only after explicit user approval.`;
+- edit_file: propose a replace or overwrite edit, show a unified diff, and write only after explicit user approval.
+
+Hooks:
+- After a successful edit_file call, NanoClaude automatically proposes running npm run build through the bash tool. Do not request a duplicate build unless another verification command is needed.`;
 
 function buildSystemPrompt(rules: Awaited<ReturnType<typeof loadProjectRules>>): string {
   if (!rules) {
@@ -271,7 +277,9 @@ function applyTodoUpdate(
 export async function runAgent(input: AgentLoopInput): Promise<string> {
   const maxIterations = input.maxIterations ?? MAX_AGENT_ITERATIONS;
   const projectRoot = input.projectRoot ?? process.cwd();
-  const projectRules = await loadProjectRules(projectRoot);
+  const hooksEnabled = input.hooksEnabled ?? true;
+  const rulesEnabled = input.rulesEnabled ?? true;
+  const projectRules = rulesEnabled ? await loadProjectRules(projectRoot) : null;
   if (projectRules) {
     console.log(`[rules] loaded ${projectRules.fileName}`);
   }
@@ -359,9 +367,11 @@ export async function runAgent(input: AgentLoopInput): Promise<string> {
       }
 
       console.log(`[tool_call] ${response.tool} ${formatToolArgs(response.args)}`);
-      recordToolCall(trace, response.tool, response.args);
+      recordToolCall(trace, response.tool, response.args, { source: "model" });
       const result = await runTool(response.tool, response.args, { projectRoot });
-      recordToolResult(trace, response.tool, response.args, result);
+      recordToolResult(trace, response.tool, response.args, result, {
+        source: "model",
+      });
       console.log(`[tool_result] success=${result.success}`);
 
       messages.push({
@@ -372,6 +382,41 @@ export async function runAgent(input: AgentLoopInput): Promise<string> {
           result,
         }),
       });
+
+      if (hooksEnabled && response.tool === "edit_file" && result.success) {
+        const hookExecution = await runAfterEditHook({ projectRoot });
+        console.log(
+          `[hook_result] ${hookExecution.hookName} success=${hookExecution.result.success}`,
+        );
+        if (!hookExecution.result.success && hookExecution.result.error) {
+          console.log(`[hook_result] ${hookExecution.hookName} error=${hookExecution.result.error}`);
+        }
+
+        recordToolCall(trace, hookExecution.tool, hookExecution.args, {
+          source: "hook",
+          hookName: hookExecution.hookName,
+        });
+        recordToolResult(
+          trace,
+          hookExecution.tool,
+          hookExecution.args,
+          hookExecution.result,
+          {
+            source: "hook",
+            hookName: hookExecution.hookName,
+          },
+        );
+
+        messages.push({
+          role: "user",
+          content: JSON.stringify({
+            type: "hook_result",
+            hook: hookExecution.hookName,
+            tool: hookExecution.tool,
+            result: hookExecution.result,
+          }),
+        });
+      }
     }
 
     const stoppedMessage = `Stopped after ${maxIterations} iterations without a final answer.`;

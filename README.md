@@ -6,7 +6,7 @@ This first version is intentionally small: it provides a Node.js + TypeScript pr
 
 ## Current Status
 
-NanoClaude is currently at **v7 (Session Trace Logging)**, implementing a full-featured agent loop with:
+NanoClaude is currently at **v10 (CLI Packaging and Polish)**, implementing a full-featured agent loop with:
 
 - OpenAI-compatible LLM provider support (including DeepSeek, etc.)
 - Read-only filesystem tools: `read_file`, `list_files`, `glob`, `grep`
@@ -15,8 +15,11 @@ NanoClaude is currently at **v7 (Session Trace Logging)**, implementing a full-f
 - In-memory todo list for complex multi-step tasks (`todo_list`, `todo_update`)
 - Project-level markdown rules loaded from `NANOCLAUDE.md`, `AGENTS.md`, or `CLAUDE.md`
 - Auditable JSON session traces saved under `.nanoclaude/sessions`
+- A hardcoded `after_edit` hook that suggests `npm run build` after successful edits
+- A lightweight Vitest suite for core non-LLM behavior
+- A packaged `nanoclaude` CLI with help, version, iteration, hook, and rules flags
 
-The project builds successfully and can run tasks via the CLI. Future work includes adding richer conversation state, tracing, tests, and a packaged CLI.
+The project builds successfully, has automated tests, and can run tasks via the CLI. Future work includes adding richer conversation state, configurable hooks, broader tests, and npm publishing polish.
 
 ## Quick Start
 
@@ -31,6 +34,8 @@ Create a local environment file:
 ```bash
 cp .env.example .env
 ```
+
+> On Windows, use `copy .env.example .env` instead.
 
 Set your model provider values in `.env`. For OpenAI:
 
@@ -54,7 +59,45 @@ Run a task:
 npm run dev -- "Explain how to create a small TypeScript CLI"
 ```
 
+After building, run the packaged CLI:
+
+```bash
+npm run build
+node dist/index.js "Explain how to create a small TypeScript CLI"
+```
+
 NanoClaude sends the task to the configured model and prints the response.
+
+## CLI Usage
+
+```bash
+nanoclaude [options] "your task here"
+```
+
+During local development, the same options work through `npm run dev`:
+
+```bash
+npm run dev -- --max-iterations 30 "Inspect the project and summarize it"
+```
+
+Options:
+
+```text
+--help                 Show help
+--version              Show package version
+--max-iterations <n>   Override the agent iteration limit
+--no-hooks             Disable automatic hooks such as after_edit build checks
+--no-rules             Skip NANOCLAUDE.md / AGENTS.md / CLAUDE.md loading
+```
+
+Examples:
+
+```bash
+node dist/index.js --help
+node dist/index.js --version
+node dist/index.js --no-rules "Explain this repository"
+node dist/index.js --no-hooks "Edit README.md but do not auto-run build"
+```
 
 ## v1 Tool Calling
 
@@ -315,12 +358,63 @@ Example:
 npm run dev -- "Inspect the project and explain what changed recently"
 ```
 
+## v8 Hooks / Auto Verification
+
+NanoClaude v8 adds a small hardcoded hook system. When `edit_file` succeeds, NanoClaude proposes a verification command from the project root:
+
+```text
+[hook] after_edit: npm run build
+```
+
+The hook reuses the existing `bash` tool, so it still asks for `y/N` approval and still records stdout, stderr, and exit code in capped form. Hook-triggered bash calls and results are also saved in the session trace with `source: "hook"`.
+
+The hook does not trigger another hook, which keeps verification from looping forever.
+
+Example:
+
+```bash
+npm run dev -- "Edit the README and verify the project still builds"
+```
+
+## v9 Basic Automated Tests
+
+NanoClaude v9 adds a lightweight Vitest suite for core logic that does not call the real LLM API.
+
+Run tests once:
+
+```bash
+npm test
+```
+
+Run tests in watch mode:
+
+```bash
+npm run test:watch
+```
+
+The current tests cover path safety, read/list/search tools, edit validation, session trace redaction, and the `after_edit` hook path.
+
+## v10 CLI Packaging and Polish
+
+NanoClaude v10 adds a proper executable entrypoint and package bin:
+
+```json
+{
+  "bin": {
+    "nanoclaude": "dist/index.js"
+  }
+}
+```
+
+The built CLI includes a shebang and supports `--help`, `--version`, `--max-iterations <n>`, `--no-hooks`, and `--no-rules`.
+
 ## Project Structure
 
 ```text
 src/
   index.ts
   llm/openai-compatible.ts
+  agent/hooks.ts
   agent/loop.ts
   agent/project-rules.ts
   agent/session-trace.ts
@@ -341,5 +435,5 @@ src/
 - Add more filesystem and shell tools.
 - Add explicit permission checks before side effects.
 - Add streaming model responses.
-- Add tests for providers, CLI parsing, and agent loop behavior.
-- Package the CLI for direct execution.
+- Add tests for providers, CLI parsing, and more agent loop behavior.
+- Polish npm publishing metadata.

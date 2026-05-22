@@ -30,17 +30,17 @@ NanoClaude exists to make those concerns explicit and readable:
 | Area | Implemented capability |
 | --- | --- |
 | CLI | TypeScript CLI with `npm run dev -- "task"` and packaged `nanoclaude` binary |
-| Model API | OpenAI-compatible provider via `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL` |
+| Model API | OpenAI-compatible provider configured by `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL` |
 | Agent loop | JSON protocol for final answers, todo updates, and tool calls |
 | Read tools | `read_file`, `list_files`, `glob`, and `grep` |
 | Editing | `edit_file` uses `path`, `oldText`, `newText`, and `reason` |
-| Edit safety | path sandboxing, unique `oldText` validation, diff preview, approval-gated writes |
-| Eval/CI mode | explicit `--auto-approve-edits` for copied eval or CI workspaces |
-| Bash tool | allow/confirm/deny policy; deny priority; unknown commands default to confirm |
+| Edit safety | Path sandboxing, exact unique `oldText` validation, unified diff preview, approval-gated writes |
+| Eval/CI mode | Explicit `--auto-approve-edits` for copied eval or CI workspaces |
+| Bash tool | Allow/confirm/deny `PermissionPolicy`, deny priority, unknown commands default to confirm |
 | Config | `nanoclaude.config.json` for verification, permissions, and agent limits |
-| Verification | successful real edits trigger configured `verify.afterEdit` commands |
-| Traces | structured session trace events with capped and redacted output |
-| Eval harness | five small local coding tasks with deterministic checkers under `eval/tasks` |
+| Verification | Successful real edits trigger configured `verify.afterEdit` commands |
+| Traces | Structured session trace events with capped and redacted output |
+| Eval harness | Five small local coding tasks with deterministic checkers under `eval/tasks` |
 | Tests | Vitest suite for non-LLM core logic; currently 57 tests |
 
 ## Quick Start
@@ -299,8 +299,9 @@ Task                   Result   Steps   Verification
 Success rate: 4/5
 ```
 
-This eval is intentionally small and local, with deterministic checkers. It is
-useful for regression checks and demos, not for broad performance claims.
+This eval is intentionally small and local. The checkers are deterministic, but
+agent success is model-dependent. It is useful for regression checks and demos,
+not for broad performance claims.
 
 Eval success still depends on the configured model; the Phase 5B release-audit rerun produced 4/5.
 
@@ -353,8 +354,7 @@ trace redaction, eval harness utilities, and CLI parsing.
 - [Architecture](docs/architecture.md)
 - [Demo transcript](docs/demo.md)
 - [Roadmap](docs/roadmap.md)
-- [Example prompts](examples/README.md)
-- [Eval harness](eval/README.md)
+- [Eval harness README](eval/README.md)
 - [Config example](nanoclaude.config.example.json)
 
 ## Resume-Friendly Summary

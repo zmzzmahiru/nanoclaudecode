@@ -110,7 +110,7 @@ Typical CLI output:
 [todo] in_progress: Inspect README
 [tool_call] read_file {"path":"README.md"}
 [tool_result] success=true
-[tool_call] edit_file {"path":"README.md","oldText":"<42 chars>","newText":"<58 chars>"}
+[tool_call] edit_file {"path":"README.md","oldText":"<42 chars>","newText":"<58 chars>","reason":"Improve wording"}
 
 [edit_file] Proposed changes for README.md:
 --- README.md
@@ -162,6 +162,15 @@ flowchart TD
 More detail: [docs/architecture.md](docs/architecture.md).
 
 ## Testing
+
+Baseline verification for contributors:
+
+```bash
+npm install
+npm run build
+npm test
+node dist/index.js --help
+```
 
 Run the build:
 

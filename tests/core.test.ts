@@ -4,6 +4,10 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("../src/permissions/confirm-edit.js", () => ({
+  confirmEdit: vi.fn(async () => true),
+}));
+
 import { runAfterEditHook } from "../src/agent/hooks.js";
 import {
   createSessionTrace,
@@ -33,6 +37,10 @@ async function writeProjectFile(
   const filePath = path.join(projectRoot, relativePath);
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, content, "utf8");
+}
+
+function parseToolOutput(output: string): Record<string, unknown> {
+  return JSON.parse(output) as Record<string, unknown>;
 }
 
 afterEach(async () => {
@@ -115,17 +123,67 @@ describe("filesystem tools", () => {
     expect(result.output).toContain("NanoClaude");
   });
 
+  it("edit_file replace mode applies a successful single replacement", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(
+      projectRoot,
+      "README.md",
+      "before\nold text\nafter\n",
+    );
+
+    const result = await editFileTool(
+      {
+        path: "README.md",
+        oldText: "old text",
+        newText: "new text",
+        reason: "exercise exact replacement",
+      },
+      { projectRoot },
+    );
+
+    const output = parseToolOutput(result.output);
+
+    expect(result.success).toBe(true);
+    expect(output).toMatchObject({
+      path: "README.md",
+      applied: true,
+      reason: "exercise exact replacement",
+      error: null,
+    });
+    expect(output.diff).toContain("-old text");
+    expect(output.diff).toContain("+new text");
+    await expect(readFile(path.join(projectRoot, "README.md"), "utf8")).resolves.toBe(
+      "before\nnew text\nafter\n",
+    );
+  });
+
   it("edit_file replace mode rejects missing oldText", async () => {
     const projectRoot = await createTempProject();
     await writeProjectFile(projectRoot, "README.md", "hello world\n");
 
     const result = await editFileTool(
-      { path: "README.md", oldText: "missing", newText: "replacement" },
+      {
+        path: "README.md",
+        oldText: "missing",
+        newText: "replacement",
+        reason: "test missing oldText",
+      },
       { projectRoot },
     );
 
+    const output = parseToolOutput(result.output);
+
     expect(result.success).toBe(false);
     expect(result.error).toBe("oldText was not found in the file.");
+    expect(output).toMatchObject({
+      path: "README.md",
+      applied: false,
+      reason: "test missing oldText",
+      error: "oldText was not found in the file.",
+    });
+    await expect(readFile(path.join(projectRoot, "README.md"), "utf8")).resolves.toBe(
+      "hello world\n",
+    );
   });
 
   it("edit_file replace mode rejects duplicate oldText", async () => {
@@ -133,7 +191,12 @@ describe("filesystem tools", () => {
     await writeProjectFile(projectRoot, "README.md", "hello\nhello\n");
 
     const result = await editFileTool(
-      { path: "README.md", oldText: "hello", newText: "hi" },
+      {
+        path: "README.md",
+        oldText: "hello",
+        newText: "hi",
+        reason: "test duplicate oldText",
+      },
       { projectRoot },
     );
 
@@ -142,6 +205,67 @@ describe("filesystem tools", () => {
 
     await expect(readFile(path.join(projectRoot, "README.md"), "utf8")).resolves.toBe(
       "hello\nhello\n",
+    );
+  });
+
+  it("edit_file rejects absolute paths", async () => {
+    const projectRoot = await createTempProject();
+    const absolutePath = path.join(projectRoot, "README.md");
+    await writeProjectFile(projectRoot, "README.md", "hello\n");
+
+    const result = await editFileTool(
+      {
+        path: absolutePath,
+        oldText: "hello",
+        newText: "hi",
+        reason: "absolute path should be rejected",
+      },
+      { projectRoot },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Absolute paths are not allowed");
+    await expect(readFile(absolutePath, "utf8")).resolves.toBe("hello\n");
+  });
+
+  it("edit_file rejects path traversal", async () => {
+    const projectRoot = await createTempProject();
+
+    const result = await editFileTool(
+      {
+        path: "../outside.txt",
+        oldText: "hello",
+        newText: "hi",
+        reason: "path traversal should be rejected",
+      },
+      { projectRoot },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("outside the project root");
+  });
+
+  it("edit_file preserves unrelated file content", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(
+      projectRoot,
+      "src/app.ts",
+      "const keep = true;\nconst target = 'old';\nconst alsoKeep = true;\n",
+    );
+
+    const result = await editFileTool(
+      {
+        path: "src/app.ts",
+        oldText: "const target = 'old';",
+        newText: "const target = 'new';",
+        reason: "update target value only",
+      },
+      { projectRoot },
+    );
+
+    expect(result.success).toBe(true);
+    await expect(readFile(path.join(projectRoot, "src/app.ts"), "utf8")).resolves.toBe(
+      "const keep = true;\nconst target = 'new';\nconst alsoKeep = true;\n",
     );
   });
 });

@@ -22,7 +22,7 @@ npm run dev -- "Add one sentence to README.md explaining that NanoClaude is educ
 [todo] done: Inspect README
 [todo] in_progress: Edit README
 
-[tool_call] edit_file {"path":"README.md","oldText":"<93 chars>","newText":"<151 chars>"}
+[tool_call] edit_file {"path":"README.md","oldText":"<93 chars>","newText":"<151 chars>","reason":"Add educational positioning"}
 
 [edit_file] Proposed changes for README.md:
 --- README.md

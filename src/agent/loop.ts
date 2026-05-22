@@ -73,8 +73,7 @@ Or request a tool call as:
 {"type":"tool_call","tool":"glob","args":{"pattern":"src/**/*.ts"}}
 {"type":"tool_call","tool":"grep","args":{"pattern":"OpenAICompatibleProvider","path":"src"}}
 {"type":"tool_call","tool":"bash","args":{"command":"npm run build","cwd":"."}}
-{"type":"tool_call","tool":"edit_file","args":{"path":"README.md","oldText":"old text","newText":"new text"}}
-{"type":"tool_call","tool":"edit_file","args":{"path":"README.md","content":"full new file content"}}
+{"type":"tool_call","tool":"edit_file","args":{"path":"README.md","oldText":"old text","newText":"new text","reason":"why this edit is needed"}}
 
 Available tools:
 - read_file: read a UTF-8 text file inside the project root.
@@ -82,7 +81,7 @@ Available tools:
 - glob: find files by glob pattern inside the project root. Ignores node_modules and dist.
 - grep: search text files under a path for a string pattern. Ignores node_modules and dist.
 - bash: run a development command from a project directory after explicit user approval. Avoid destructive or high-risk commands.
-- edit_file: propose a replace or overwrite edit, show a unified diff, and write only after explicit user approval.
+- edit_file: replace exactly one oldText occurrence with newText, show a unified diff, and write only after explicit user approval. Include a short reason.
 
 Hooks:
 - After a successful edit_file call, NanoClaude automatically proposes running npm run build through the bash tool. Do not request a duplicate build unless another verification command is needed.`;
@@ -274,6 +273,15 @@ function applyTodoUpdate(
   return todos;
 }
 
+function editWasApplied(output: string): boolean {
+  try {
+    const parsed = JSON.parse(output) as { applied?: unknown };
+    return parsed.applied === true;
+  } catch {
+    return true;
+  }
+}
+
 export async function runAgent(input: AgentLoopInput): Promise<string> {
   const maxIterations = input.maxIterations ?? MAX_AGENT_ITERATIONS;
   const projectRoot = input.projectRoot ?? process.cwd();
@@ -383,7 +391,12 @@ export async function runAgent(input: AgentLoopInput): Promise<string> {
         }),
       });
 
-      if (hooksEnabled && response.tool === "edit_file" && result.success) {
+      if (
+        hooksEnabled &&
+        response.tool === "edit_file" &&
+        result.success &&
+        editWasApplied(result.output)
+      ) {
         const hookExecution = await runAfterEditHook({ projectRoot });
         console.log(
           `[hook_result] ${hookExecution.hookName} success=${hookExecution.result.success}`,

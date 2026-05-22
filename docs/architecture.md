@@ -258,9 +258,9 @@ Trace output is capped and redacted. Redaction covers obvious `.env`-style secre
 
 The eval harness lives in `eval/run-eval.ts`.
 
-It discovers five deterministic tasks under `eval/tasks`, copies each fixture repo into `eval/results/<run-id>/workspaces`, runs NanoClaude with edit auto-approval enabled only for those copied workspaces, runs each `check.js`, and prints a PASS/FAIL table.
+It discovers five small local tasks under `eval/tasks`, copies each fixture repo into `eval/results/<run-id>/workspaces`, runs NanoClaude with edit auto-approval enabled only for those copied workspaces, runs each deterministic `check.js`, and prints a PASS/FAIL table.
 
-A recorded local run in this repository reached 5/5. The Phase 5B release-audit rerun produced 4/5 because the configured model stopped early on one task. This is a small local regression and demo harness, not SWE-bench and not a broad benchmark.
+The latest release-readiness eval run in this repository produced 4/5 because the configured model stopped early on one task. This is a small local regression and demo harness, not SWE-bench and not a broad benchmark.
 
 ## Testing Strategy
 

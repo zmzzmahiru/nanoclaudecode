@@ -113,16 +113,16 @@ Transcript excerpt:
 [session] saved .nanoclaude/sessions/2026-05-22T05-23-32-006Z-wp6s6p.json
 
 Task                   Result   Steps   Verification
-001-fix-failing-test   PASS     24      check.js
-002-add-cli-flag       PASS     15      check.js
-003-update-readme      PASS     10      check.js
-004-fix-type-error     PASS     23      check.js
+001-fix-failing-test   PASS     22      check.js
+002-add-cli-flag       FAIL     10      check.js
+003-update-readme      PASS     9       check.js
+004-fix-type-error     PASS     17      check.js
 005-add-unit-test      PASS     20      check.js
 
-Success rate: 5/5
+Success rate: 4/5
 ```
 
-This is an example successful run from the local harness. The Phase 5B release-audit rerun produced 4/5 because the configured model stopped early on `002-add-cli-flag`.
+This is the Phase 5B release-readiness run. It produced 4/5 because the configured model stopped early on `002-add-cli-flag`.
 
 `--auto-approve-edits` only affects edit patch approval. It does not approve confirm-level bash commands, bypass denied commands, disable path safety, skip unique `oldText` validation, or disable verification hooks.
 

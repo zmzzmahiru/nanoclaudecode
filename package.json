@@ -1,7 +1,7 @@
 {
   "name": "nanoclaude",
   "version": "1.0.0",
-  "description": "A lightweight AI coding agent framework in TypeScript.",
+  "description": "A lightweight TypeScript coding-agent CLI with safe patch editing, permissioned tools, traces, and local evals.",
   "main": "dist/index.js",
   "bin": {
     "nanoclaude": "dist/index.js"
@@ -14,8 +14,17 @@
     "test:watch": "vitest",
     "eval": "tsx eval/run-eval.ts"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "ai-agent",
+    "coding-agent",
+    "typescript",
+    "cli",
+    "llm",
+    "openai-compatible",
+    "tool-calling",
+    "evals"
+  ],
+  "author": "zmzzmahiru",
   "license": "ISC",
   "type": "module",
   "dependencies": {

@@ -33,7 +33,7 @@ NanoClaude exists to make those concerns explicit and readable:
 | Config | `nanoclaude.config.json` for verification, permissions, and agent limits |
 | Verification | successful real edits trigger configured `verify.afterEdit` commands |
 | Traces | structured session trace events with capped and redacted output |
-| Eval harness | five deterministic local coding tasks under `eval/tasks` |
+| Eval harness | five small local coding tasks with deterministic checkers under `eval/tasks` |
 | Tests | Vitest suite for non-LLM core logic; currently 57 tests |
 
 ## Quick Start
@@ -83,10 +83,10 @@ Run the local eval harness:
 npm run eval
 ```
 
-Recorded local eval result from this repository:
+Latest release-readiness eval result from this repository:
 
 ```text
-Success rate: 5/5
+Success rate: 4/5
 ```
 
 The Phase 5B release-audit rerun produced 4/5 because the configured model stopped early on `002-add-cli-flag`. This is a small local eval harness, not SWE-bench and not a broad benchmark.
@@ -270,20 +270,21 @@ eval/
 - reports PASS/FAIL, step count, and checker name
 - saves summaries and traces under `eval/results/`
 
-Example successful local run:
+Latest release-readiness local run:
 
 ```text
 Task                   Result   Steps   Verification
-001-fix-failing-test   PASS     24      check.js
-002-add-cli-flag       PASS     15      check.js
-003-update-readme      PASS     10      check.js
-004-fix-type-error     PASS     23      check.js
+001-fix-failing-test   PASS     22      check.js
+002-add-cli-flag       FAIL     10      check.js
+003-update-readme      PASS     9       check.js
+004-fix-type-error     PASS     17      check.js
 005-add-unit-test      PASS     20      check.js
 
-Success rate: 5/5
+Success rate: 4/5
 ```
 
-This eval is intentionally small and deterministic. It is useful for regression checks and demos, not for broad performance claims.
+This eval is intentionally small and local, with deterministic checkers. It is useful for regression checks and demos, not for broad performance claims.
+
 Eval success still depends on the configured model; the Phase 5B release-audit rerun produced 4/5.
 
 ## Architecture
@@ -326,10 +327,14 @@ The test suite does not call a real LLM. It focuses on deterministic behavior: p
 
 ## Related Docs
 
+- [Project summary](docs/project-summary.md)
+- [Interview notes](docs/interview-notes.md)
 - [Architecture](docs/architecture.md)
 - [Demo transcript](docs/demo.md)
 - [Roadmap](docs/roadmap.md)
 - [Example prompts](examples/README.md)
+- [Eval harness](eval/README.md)
+- [Config example](nanoclaude.config.example.json)
 
 ## Resume-Friendly Summary
 

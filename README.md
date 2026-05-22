@@ -83,13 +83,13 @@ Run the local eval harness:
 npm run eval
 ```
 
-Latest local eval result from this repository:
+Recorded local eval result from this repository:
 
 ```text
 Success rate: 5/5
 ```
 
-This is a small local eval harness, not SWE-bench and not a broad benchmark.
+The Phase 5B release-audit rerun produced 4/5 because the configured model stopped early on `002-add-cli-flag`. This is a small local eval harness, not SWE-bench and not a broad benchmark.
 
 ## CLI Usage
 
@@ -121,6 +121,8 @@ npm run dev -- --auto-approve-edits "Run a controlled eval task in a temp worksp
 ## Configuration
 
 NanoClaude looks for `nanoclaude.config.json` in the project root. Missing fields are merged with defaults.
+
+See [nanoclaude.config.example.json](nanoclaude.config.example.json) for a copyable example.
 
 ```json
 {
@@ -268,7 +270,7 @@ eval/
 - reports PASS/FAIL, step count, and checker name
 - saves summaries and traces under `eval/results/`
 
-Latest local run:
+Example successful local run:
 
 ```text
 Task                   Result   Steps   Verification
@@ -282,6 +284,7 @@ Success rate: 5/5
 ```
 
 This eval is intentionally small and deterministic. It is useful for regression checks and demos, not for broad performance claims.
+Eval success still depends on the configured model; the Phase 5B release-audit rerun produced 4/5.
 
 ## Architecture
 

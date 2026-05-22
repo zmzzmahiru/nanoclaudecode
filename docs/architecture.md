@@ -260,7 +260,7 @@ The eval harness lives in `eval/run-eval.ts`.
 
 It discovers five deterministic tasks under `eval/tasks`, copies each fixture repo into `eval/results/<run-id>/workspaces`, runs NanoClaude with edit auto-approval enabled only for those copied workspaces, runs each `check.js`, and prints a PASS/FAIL table.
 
-The latest local run in this repository was 5/5. This is a small local regression and demo harness, not SWE-bench and not a broad benchmark.
+A recorded local run in this repository reached 5/5. The Phase 5B release-audit rerun produced 4/5 because the configured model stopped early on one task. This is a small local regression and demo harness, not SWE-bench and not a broad benchmark.
 
 ## Testing Strategy
 

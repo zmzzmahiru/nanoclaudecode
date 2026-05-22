@@ -122,6 +122,8 @@ Task                   Result   Steps   Verification
 Success rate: 5/5
 ```
 
+This is an example successful run from the local harness. The Phase 5B release-audit rerun produced 4/5 because the configured model stopped early on `002-add-cli-flag`.
+
 `--auto-approve-edits` only affects edit patch approval. It does not approve confirm-level bash commands, bypass denied commands, disable path safety, skip unique `oldText` validation, or disable verification hooks.
 
 ## Trace Example

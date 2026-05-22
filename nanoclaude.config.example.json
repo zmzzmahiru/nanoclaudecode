@@ -1,0 +1,43 @@
+{
+  "verify": {
+    "afterEdit": ["npm test", "npm run build"],
+    "timeoutMs": 30000
+  },
+  "permissions": {
+    "allowCommands": [
+      "pwd",
+      "ls",
+      "cat",
+      "grep",
+      "find",
+      "npm test",
+      "npm run build",
+      "npx tsc",
+      "pytest"
+    ],
+    "confirmCommands": [
+      "npm install",
+      "pnpm install",
+      "yarn install",
+      "git checkout",
+      "git commit",
+      "git reset",
+      "rm",
+      "mv",
+      "cp"
+    ],
+    "denyCommands": [
+      "sudo",
+      "ssh",
+      "scp",
+      "curl",
+      "wget",
+      "chmod 777",
+      "chown"
+    ]
+  },
+  "agent": {
+    "maxSteps": 20,
+    "maxToolOutputChars": 12000
+  }
+}

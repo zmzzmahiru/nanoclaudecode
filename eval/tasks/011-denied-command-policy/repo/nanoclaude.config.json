@@ -1,0 +1,15 @@
+{
+  "verify": {
+    "afterEdit": [],
+    "timeoutMs": 10000
+  },
+  "permissions": {
+    "allowCommands": ["npm test"],
+    "confirmCommands": [],
+    "denyCommands": ["sudo", "curl", "wget"]
+  },
+  "agent": {
+    "maxSteps": 12,
+    "maxToolOutputChars": 6000
+  }
+}

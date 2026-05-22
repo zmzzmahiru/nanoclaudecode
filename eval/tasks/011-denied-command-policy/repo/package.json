@@ -1,0 +1,8 @@
+{
+  "name": "eval-denied-command-policy",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "node -e \"require('fs').writeFileSync('sudo-ran.txt','ran')\""
+  }
+}

@@ -96,6 +96,7 @@ export async function runChecker(
   checkerPath: string,
   cwd: string,
   timeoutMs = CHECK_TIMEOUT_MS,
+  extraEnv: Record<string, string> = {},
 ): Promise<CheckerResult> {
   const command = checkerPath.endsWith(".js") ? process.execPath : "sh";
   const args = checkerPath.endsWith(".js") ? [checkerPath] : [checkerPath];
@@ -103,6 +104,10 @@ export async function runChecker(
   return new Promise((resolve) => {
     const child = spawn(command, args, {
       cwd,
+      env: {
+        ...process.env,
+        ...extraEnv,
+      },
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
@@ -250,8 +255,10 @@ async function runSingleTask(input: {
     console.log = originalLog;
   }
 
-  const checker = await runChecker(input.task.checkerPath, workspace);
   const tracePath = await findLatestSessionTrace(workspace);
+  const checker = await runChecker(input.task.checkerPath, workspace, CHECK_TIMEOUT_MS, {
+    NANOCLAUDE_TRACE_PATH: tracePath ?? "",
+  });
   const steps = await extractTraceStepCount(tracePath);
   const result = parsePassFail(checker);
   const summaryPath = path.join(input.runRoot, `${input.task.id}.summary.json`);

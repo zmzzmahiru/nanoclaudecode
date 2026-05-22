@@ -1292,6 +1292,27 @@ describe("eval harness", () => {
     expect(parsePassFail(result)).toBe("PASS");
   });
 
+  it("passes trace path environment to check.js", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(
+      projectRoot,
+      "check.js",
+      "if (process.env.NANOCLAUDE_TRACE_PATH !== 'trace.json') process.exit(1);\n",
+    );
+
+    const result = await runChecker(
+      path.join(projectRoot, "check.js"),
+      projectRoot,
+      30_000,
+      {
+        NANOCLAUDE_TRACE_PATH: "trace.json",
+      },
+    );
+
+    expect(result.passed).toBe(true);
+    expect(parsePassFail(result)).toBe("PASS");
+  });
+
   it("formats a final result table", () => {
     const results: EvalResult[] = [
       {

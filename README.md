@@ -1,12 +1,19 @@
 # NanoClaude
 
-NanoClaude is a lightweight Claude-Code-style coding agent CLI built in TypeScript, focused on safe local tool execution, patch-based editing, deterministic verification, auditable traces, and reproducible local evals.
+NanoClaude is a lightweight Claude-Code-style coding agent CLI built in
+TypeScript, focused on safe local tool execution, patch-based editing,
+deterministic verification, auditable traces, and reproducible local evals.
 
-It is not a clone of any commercial coding agent. It is a compact infrastructure project that exposes the moving parts behind a coding-agent runtime: model loop, JSON tool protocol, path safety, permission policy, diff-based edits, verification, traces, and local evaluation.
+It is not a clone of any commercial coding agent. It is a compact
+infrastructure project that exposes the moving parts behind a coding-agent
+runtime: model loop, JSON tool protocol, path safety, permission policy,
+diff-based edits, verification, traces, and local evaluation.
 
 ## Why NanoClaude?
 
-Modern coding agents need more than chat completion. A useful local coding agent needs to inspect files, make narrowly scoped edits, run verification, ask before risky actions, and leave behind enough evidence to debug what happened.
+Modern coding agents need more than chat completion. A useful local coding
+agent needs to inspect files, make narrowly scoped edits, run verification, ask
+before risky actions, and leave behind enough evidence to debug what happened.
 
 NanoClaude exists to make those concerns explicit and readable:
 
@@ -23,13 +30,13 @@ NanoClaude exists to make those concerns explicit and readable:
 | Area | Implemented capability |
 | --- | --- |
 | CLI | TypeScript CLI with `npm run dev -- "task"` and packaged `nanoclaude` binary |
-| Model API | OpenAI-compatible provider configured by `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL` |
+| Model API | OpenAI-compatible provider via `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL` |
 | Agent loop | JSON protocol for final answers, todo updates, and tool calls |
 | Read tools | `read_file`, `list_files`, `glob`, and `grep` |
 | Editing | `edit_file` uses `path`, `oldText`, `newText`, and `reason` |
-| Edit safety | path sandboxing, exact unique `oldText` validation, unified diff preview, approval-gated writes |
+| Edit safety | path sandboxing, unique `oldText` validation, diff preview, approval-gated writes |
 | Eval/CI mode | explicit `--auto-approve-edits` for copied eval or CI workspaces |
-| Bash tool | allow/confirm/deny `PermissionPolicy`, deny priority, unknown commands default to confirm |
+| Bash tool | allow/confirm/deny policy; deny priority; unknown commands default to confirm |
 | Config | `nanoclaude.config.json` for verification, permissions, and agent limits |
 | Verification | successful real edits trigger configured `verify.afterEdit` commands |
 | Traces | structured session trace events with capped and redacted output |
@@ -89,7 +96,9 @@ Latest release-readiness eval result from this repository:
 Success rate: 4/5
 ```
 
-The Phase 5B release-audit rerun produced 4/5 because the configured model stopped early on `002-add-cli-flag`. This is a small local eval harness, not SWE-bench and not a broad benchmark.
+The Phase 5B release-audit rerun produced 4/5 because the configured model
+stopped early on `002-add-cli-flag`. This is a small local eval harness, not
+SWE-bench and not a broad benchmark.
 
 ## CLI Usage
 
@@ -120,7 +129,8 @@ npm run dev -- --auto-approve-edits "Run a controlled eval task in a temp worksp
 
 ## Configuration
 
-NanoClaude looks for `nanoclaude.config.json` in the project root. Missing fields are merged with defaults.
+NanoClaude looks for `nanoclaude.config.json` in the project root. Missing
+fields are merged with defaults.
 
 See [nanoclaude.config.example.json](nanoclaude.config.example.json) for a copyable example.
 
@@ -203,13 +213,15 @@ NanoClaude is designed to make local side effects explicit:
 - Default write behavior requires approval.
 - Non-interactive runs without approval reject edits rather than silently applying them.
 - `--auto-approve-edits` is explicit and intended for eval/CI temp workspaces.
-- `--auto-approve-edits` does not bypass path safety, unique-match validation, bash policy, or verification hooks.
+- `--auto-approve-edits` does not bypass path safety, unique-match validation,
+  bash policy, or verification hooks.
 - `bash` uses allow/confirm/deny command policy.
 - Denied commands do not run.
 - Unknown commands default to confirm.
 - Tool output and traces redact obvious secret-like values where supported.
 
-This is not production-grade sandboxing. It is a conservative local safety model for a small coding-agent framework.
+This is not production-grade sandboxing. It is a conservative local safety model
+for a small coding-agent framework.
 
 ## Verification Hooks
 
@@ -242,7 +254,11 @@ verification
 final
 ```
 
-Trace events capture model messages, tool calls, tool results, bash permission decisions, edit outcomes, verification results, and final status. Edit trace events include whether a patch was manually approved, auto-approved, rejected, or not required.
+Trace events capture model messages, tool calls, tool results, bash permission
+decisions, edit outcomes, verification results, and final status.
+
+Edit trace events include whether a patch was manually approved, auto-approved,
+rejected, or not required.
 
 ## Local Eval Harness
 
@@ -283,7 +299,8 @@ Task                   Result   Steps   Verification
 Success rate: 4/5
 ```
 
-This eval is intentionally small and local, with deterministic checkers. It is useful for regression checks and demos, not for broad performance claims.
+This eval is intentionally small and local, with deterministic checkers. It is
+useful for regression checks and demos, not for broad performance claims.
 
 Eval success still depends on the configured model; the Phase 5B release-audit rerun produced 4/5.
 
@@ -305,7 +322,9 @@ See [docs/architecture.md](docs/architecture.md) for more detail.
 
 ## Demo
 
-See [docs/demo.md](docs/demo.md) for a terminal-style walkthrough showing a failing test fix, patch preview, approval behavior, verification, and trace output.
+See [docs/demo.md](docs/demo.md) for a terminal-style walkthrough showing a
+failing test fix, patch preview, approval behavior, verification, and trace
+output.
 
 ## Testing
 
@@ -314,7 +333,9 @@ npm run build
 npm test
 ```
 
-The test suite does not call a real LLM. It focuses on deterministic behavior: path safety, tool results, edit validation, bash permissions, config loading, trace redaction, eval harness utilities, and CLI parsing.
+The test suite does not call a real LLM. It focuses on deterministic behavior:
+path safety, tool results, edit validation, bash permissions, config loading,
+trace redaction, eval harness utilities, and CLI parsing.
 
 ## Limitations
 
@@ -338,4 +359,7 @@ The test suite does not call a real LLM. It focuses on deterministic behavior: p
 
 ## Resume-Friendly Summary
 
-NanoClaude is a TypeScript coding-agent infrastructure project demonstrating LLM orchestration, JSON tool calling, safe patch-style editing, permission-controlled bash execution, configurable verification hooks, auditable redacted traces, CLI packaging, and a reproducible local eval harness.
+NanoClaude is a TypeScript coding-agent infrastructure project demonstrating LLM
+orchestration, JSON tool calling, safe patch-style editing,
+permission-controlled bash execution, configurable verification hooks, auditable
+redacted traces, CLI packaging, and a reproducible local eval harness.

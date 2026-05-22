@@ -1,5 +1,10 @@
 import { exec } from "node:child_process";
 
+import {
+  configToPermissionPolicy,
+  DEFAULT_CONFIG,
+  type PermissionPolicy,
+} from "../config.js";
 import { confirm } from "../permissions/confirm.js";
 import { resolveProjectRoot } from "./path-safety.js";
 import type { ToolContext, ToolResult } from "./read-file.js";
@@ -7,12 +12,6 @@ import type { ToolContext, ToolResult } from "./read-file.js";
 export interface BashArgs {
   command: string;
   cwd?: string;
-}
-
-export interface PermissionPolicy {
-  allow: string[];
-  confirm: string[];
-  deny: string[];
 }
 
 export type CommandDecision = "allow" | "confirm" | "deny";
@@ -33,34 +32,9 @@ interface ExecError extends Error {
   killed?: boolean;
 }
 
-export const DEFAULT_POLICY: PermissionPolicy = {
-  allow: [
-    "pwd",
-    "ls",
-    "cat",
-    "grep",
-    "find",
-    "npm test",
-    "npm run build",
-    "npx tsc",
-    "pytest",
-  ],
-  confirm: [
-    "npm install",
-    "pnpm install",
-    "yarn install",
-    "git checkout",
-    "git commit",
-    "git reset",
-    "rm",
-    "mv",
-    "cp",
-  ],
-  deny: ["sudo", "ssh", "scp", "curl", "wget", "chmod 777", "chown"],
-};
+export const DEFAULT_POLICY: PermissionPolicy =
+  configToPermissionPolicy(DEFAULT_CONFIG);
 
-const COMMAND_TIMEOUT_MS = 30_000;
-const MAX_OUTPUT_LENGTH = 12_000;
 const MAX_EXEC_BUFFER = 2 * 1024 * 1024;
 
 function normalizeCommand(command: string): string {
@@ -110,12 +84,12 @@ export function decideCommand(
   return "confirm";
 }
 
-function capOutput(value: string): string {
-  if (value.length <= MAX_OUTPUT_LENGTH) {
+function capOutput(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
     return value;
   }
 
-  return `${value.slice(0, MAX_OUTPUT_LENGTH)}\n... output truncated`;
+  return `${value.slice(0, maxLength)}\n... output truncated`;
 }
 
 function formatOutput(result: CommandResult): string {
@@ -146,13 +120,15 @@ function runCommand(
   command: string,
   cwd: string,
   decision: CommandDecision,
+  timeoutMs: number,
+  maxOutputChars: number,
 ): Promise<CommandResult> {
   return new Promise((resolve) => {
     exec(
       command,
       {
         cwd,
-        timeout: COMMAND_TIMEOUT_MS,
+        timeout: timeoutMs,
         maxBuffer: MAX_EXEC_BUFFER,
       },
       (error: ExecError | null, stdout, stderr) => {
@@ -164,14 +140,14 @@ function runCommand(
           command,
           decision,
           exitCode,
-          stdout: capOutput(stdout),
-          stderr: capOutput(stderr),
+          stdout: capOutput(stdout, maxOutputChars),
+          stderr: capOutput(stderr, maxOutputChars),
           timedOut,
           error:
             exitCode === 0
               ? null
               : timedOut
-                ? `Command timed out after ${COMMAND_TIMEOUT_MS}ms.`
+                ? `Command timed out after ${timeoutMs}ms.`
                 : `Command exited with code ${exitCode}.`,
         });
       },
@@ -190,7 +166,11 @@ export async function bashTool(
       throw new Error("Missing required argument: command");
     }
 
-    const decision = decideCommand(command);
+    const policy = context.permissionPolicy ?? DEFAULT_POLICY;
+    const timeoutMs = context.commandTimeoutMs ?? DEFAULT_CONFIG.verify.timeoutMs;
+    const maxToolOutputChars =
+      context.maxToolOutputChars ?? DEFAULT_CONFIG.agent.maxToolOutputChars;
+    const decision = decideCommand(command, policy);
 
     if (decision === "deny") {
       return rejectedResult(command, decision, "Command denied by policy.");
@@ -206,7 +186,13 @@ export async function bashTool(
       }
     }
 
-    const result = await runCommand(command, cwd, decision);
+    const result = await runCommand(
+      command,
+      cwd,
+      decision,
+      timeoutMs,
+      maxToolOutputChars,
+    );
 
     return {
       success: result.exitCode === 0,

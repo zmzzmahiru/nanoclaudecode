@@ -9,10 +9,16 @@ vi.mock("../src/permissions/confirm-edit.js", () => ({
 }));
 
 import { runAfterEditHook } from "../src/agent/hooks.js";
+import { runAgent } from "../src/agent/loop.js";
 import {
   createSessionTrace,
   recordToolResult,
 } from "../src/agent/session-trace.js";
+import {
+  configToPermissionPolicy,
+  DEFAULT_CONFIG,
+  loadConfig,
+} from "../src/config.js";
 import { bashTool, decideCommand } from "../src/tools/bash.js";
 import { editFileTool } from "../src/tools/edit-file.js";
 import { globTool } from "../src/tools/glob.js";
@@ -428,6 +434,144 @@ describe("bash permission policy", () => {
       timedOut: false,
       error: "Command rejected by user.",
     });
+  });
+});
+
+describe("config loader", () => {
+  it("uses defaults when config is missing", async () => {
+    const projectRoot = await createTempProject();
+
+    await expect(loadConfig(projectRoot)).resolves.toEqual(DEFAULT_CONFIG);
+  });
+
+  it("merges partial config with defaults", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(
+      projectRoot,
+      "nanoclaude.config.json",
+      JSON.stringify({
+        agent: {
+          maxSteps: 7,
+        },
+        permissions: {
+          allowCommands: ["echo"],
+        },
+      }),
+    );
+
+    const config = await loadConfig(projectRoot);
+
+    expect(config.agent.maxSteps).toBe(7);
+    expect(config.agent.maxToolOutputChars).toBe(
+      DEFAULT_CONFIG.agent.maxToolOutputChars,
+    );
+    expect(config.permissions.allowCommands).toEqual(["echo"]);
+    expect(config.permissions.confirmCommands).toEqual(
+      DEFAULT_CONFIG.permissions.confirmCommands,
+    );
+    expect(config.verify).toEqual(DEFAULT_CONFIG.verify);
+  });
+
+  it("returns a helpful error for malformed JSON", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(projectRoot, "nanoclaude.config.json", "{ nope");
+
+    await expect(loadConfig(projectRoot)).rejects.toThrow("malformed JSON");
+  });
+
+  it("returns a helpful error for invalid field types", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(
+      projectRoot,
+      "nanoclaude.config.json",
+      JSON.stringify({
+        permissions: {
+          allowCommands: "npm test",
+        },
+      }),
+    );
+
+    await expect(loadConfig(projectRoot)).rejects.toThrow(
+      "allowCommands must be an array of strings",
+    );
+  });
+
+  it("converts permission config into a bash PermissionPolicy", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(
+      projectRoot,
+      "nanoclaude.config.json",
+      JSON.stringify({
+        permissions: {
+          allowCommands: ["echo"],
+          confirmCommands: ["python"],
+          denyCommands: ["npm test"],
+        },
+      }),
+    );
+
+    const config = await loadConfig(projectRoot);
+    const policy = configToPermissionPolicy(config);
+
+    expect(policy).toEqual({
+      allow: ["echo"],
+      confirm: ["python"],
+      deny: ["npm test"],
+    });
+  });
+
+  it("custom allow, confirm, and deny commands affect decideCommand", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(
+      projectRoot,
+      "nanoclaude.config.json",
+      JSON.stringify({
+        permissions: {
+          allowCommands: ["echo"],
+          confirmCommands: ["python"],
+          denyCommands: ["npm test"],
+        },
+      }),
+    );
+
+    const policy = configToPermissionPolicy(await loadConfig(projectRoot));
+
+    expect(decideCommand("echo hello", policy)).toBe("allow");
+    expect(decideCommand("python script.py", policy)).toBe("confirm");
+    expect(decideCommand("npm test", policy)).toBe("deny");
+  });
+
+  it("agent.maxSteps is read from config", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(
+      projectRoot,
+      "nanoclaude.config.json",
+      JSON.stringify({
+        agent: {
+          maxSteps: 1,
+        },
+      }),
+    );
+    const llm = {
+      complete: async () =>
+        JSON.stringify({
+          type: "todo_update",
+          id: "1",
+          status: "in_progress",
+          content: "Keep working",
+        }),
+    };
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await expect(
+      runAgent({
+        task: "test config max steps",
+        llm,
+        projectRoot,
+        hooksEnabled: false,
+        rulesEnabled: false,
+      }),
+    ).resolves.toBe("Stopped after 1 iterations without a final answer.");
   });
 });
 

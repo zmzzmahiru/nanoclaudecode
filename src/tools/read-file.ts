@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 
+import type { PermissionPolicy } from "../config.js";
 import { resolveInsideProject } from "./path-safety.js";
 
 export interface ToolResult {
@@ -10,6 +11,9 @@ export interface ToolResult {
 
 export interface ToolContext {
   projectRoot: string;
+  permissionPolicy?: PermissionPolicy;
+  maxToolOutputChars?: number;
+  commandTimeoutMs?: number;
 }
 
 export interface ReadFileArgs {

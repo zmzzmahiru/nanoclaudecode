@@ -1,4 +1,5 @@
 import { runTool, type ToolResult } from "../tools/index.js";
+import type { ToolContext } from "../tools/read-file.js";
 
 export interface HookToolExecution {
   hookName: "after_edit";
@@ -10,9 +11,7 @@ export interface HookToolExecution {
   result: ToolResult;
 }
 
-export interface HookContext {
-  projectRoot: string;
-}
+export type HookContext = ToolContext;
 
 export async function runAfterEditHook(
   context: HookContext,

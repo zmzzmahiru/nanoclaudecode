@@ -1,4 +1,5 @@
 import type { LLMMessage, LLMProvider } from "../llm/openai-compatible.js";
+import { configToPermissionPolicy, loadConfig } from "../config.js";
 import { runAfterEditHook } from "./hooks.js";
 import { loadProjectRules } from "./project-rules.js";
 import {
@@ -283,10 +284,17 @@ function editWasApplied(output: string): boolean {
 }
 
 export async function runAgent(input: AgentLoopInput): Promise<string> {
-  const maxIterations = input.maxIterations ?? MAX_AGENT_ITERATIONS;
   const projectRoot = input.projectRoot ?? process.cwd();
+  const config = await loadConfig(projectRoot);
+  const maxIterations = input.maxIterations ?? config.agent.maxSteps ?? MAX_AGENT_ITERATIONS;
   const hooksEnabled = input.hooksEnabled ?? true;
   const rulesEnabled = input.rulesEnabled ?? true;
+  const toolContext = {
+    projectRoot,
+    permissionPolicy: configToPermissionPolicy(config),
+    maxToolOutputChars: config.agent.maxToolOutputChars,
+    commandTimeoutMs: config.verify.timeoutMs,
+  };
   const projectRules = rulesEnabled ? await loadProjectRules(projectRoot) : null;
   if (projectRules) {
     console.log(`[rules] loaded ${projectRules.fileName}`);
@@ -376,7 +384,7 @@ export async function runAgent(input: AgentLoopInput): Promise<string> {
 
       console.log(`[tool_call] ${response.tool} ${formatToolArgs(response.args)}`);
       recordToolCall(trace, response.tool, response.args, { source: "model" });
-      const result = await runTool(response.tool, response.args, { projectRoot });
+      const result = await runTool(response.tool, response.args, toolContext);
       recordToolResult(trace, response.tool, response.args, result, {
         source: "model",
       });
@@ -397,7 +405,7 @@ export async function runAgent(input: AgentLoopInput): Promise<string> {
         result.success &&
         editWasApplied(result.output)
       ) {
-        const hookExecution = await runAfterEditHook({ projectRoot });
+        const hookExecution = await runAfterEditHook(toolContext);
         console.log(
           `[hook_result] ${hookExecution.hookName} success=${hookExecution.result.success}`,
         );

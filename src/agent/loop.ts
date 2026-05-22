@@ -80,7 +80,7 @@ Available tools:
 - list_files: list files and directories directly inside a project directory.
 - glob: find files by glob pattern inside the project root. Ignores node_modules and dist.
 - grep: search text files under a path for a string pattern. Ignores node_modules and dist.
-- bash: run a development command from a project directory after explicit user approval. Avoid destructive or high-risk commands.
+- bash: run a development command from the project root using the allow/confirm/deny permission policy. Confirm-class commands require explicit user approval.
 - edit_file: replace exactly one oldText occurrence with newText, show a unified diff, and write only after explicit user approval. Include a short reason.
 
 Hooks:

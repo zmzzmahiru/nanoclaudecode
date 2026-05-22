@@ -15,7 +15,7 @@ Modern coding agents can feel mysterious because tool calling, permission checks
 | LLM provider | OpenAI-compatible chat provider via `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL` |
 | Agent protocol | Simple JSON responses for final answers, tool calls, and todo updates |
 | Read-only tools | `read_file`, `list_files`, `glob`, `grep` |
-| Command execution | Permission-controlled `bash` tool with timeout and capped output |
+| Command execution | Policy-controlled `bash` tool with allow/confirm/deny decisions, timeout, and capped output |
 | Editing | Safe `edit_file` with unified diff preview and `y/N` approval |
 | Plan Mode | In-memory todo list for complex tasks |
 | Project rules | Loads `NANOCLAUDE.md`, `AGENTS.md`, or `CLAUDE.md` from the project root |
@@ -135,7 +135,7 @@ NanoClaude is designed to make side effects visible and reversible:
 
 - Paths are resolved with real-path checks and must stay inside the project root.
 - `read_file`, `list_files`, `glob`, and `grep` are read-only.
-- `bash` asks for approval before running and rejects obvious high-risk commands.
+- `bash` uses a deterministic allow/confirm/deny policy. Confirm-class commands ask for approval, denied commands are rejected, and allowed verification commands can run without an extra prompt.
 - `edit_file` shows a unified diff and asks for approval before writing.
 - Tool outputs are capped before being sent back to the model or saved in traces.
 - Session traces redact common secret-looking values and avoid storing `.env` contents.

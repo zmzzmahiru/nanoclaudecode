@@ -13,6 +13,7 @@ import {
   createSessionTrace,
   recordToolResult,
 } from "../src/agent/session-trace.js";
+import { bashTool, decideCommand } from "../src/tools/bash.js";
 import { editFileTool } from "../src/tools/edit-file.js";
 import { globTool } from "../src/tools/glob.js";
 import { grepTool } from "../src/tools/grep.js";
@@ -321,8 +322,112 @@ describe("hooks", () => {
         cwd: ".",
       },
     });
-    expect(execution.result.success).toBe(false);
-    expect(execution.result.error).toBe("Command rejected by user.");
+    expect(execution.result.success).toBe(true);
+    expect(parseToolOutput(execution.result.output)).toMatchObject({
+      command: "npm run build",
+      decision: "allow",
+      exitCode: 0,
+      timedOut: false,
+      error: null,
+    });
+  });
+});
+
+describe("bash permission policy", () => {
+  it("classifies allowed commands", () => {
+    expect(decideCommand("npm run build")).toBe("allow");
+    expect(decideCommand("npm test -- --runInBand")).toBe("allow");
+    expect(decideCommand("ls -la")).toBe("allow");
+  });
+
+  it("classifies confirm commands", () => {
+    expect(decideCommand("npm install")).toBe("confirm");
+    expect(decideCommand("git reset --hard")).toBe("confirm");
+  });
+
+  it("classifies denied commands", () => {
+    expect(decideCommand("sudo npm test")).toBe("deny");
+    expect(decideCommand("curl https://example.com")).toBe("deny");
+  });
+
+  it("defaults unknown commands to confirm", () => {
+    expect(decideCommand("python script.py")).toBe("confirm");
+  });
+
+  it("gives deny rules priority over allow rules", () => {
+    expect(decideCommand("sudo npm test")).toBe("deny");
+  });
+
+  it("does not execute denied commands", async () => {
+    const projectRoot = await createTempProject();
+    const result = await bashTool(
+      { command: "sudo npm test", cwd: "." },
+      { projectRoot },
+    );
+    const output = parseToolOutput(result.output);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Command denied by policy.");
+    expect(output).toMatchObject({
+      command: "sudo npm test",
+      decision: "deny",
+      exitCode: null,
+      stdout: "",
+      stderr: "",
+      timedOut: false,
+      error: "Command denied by policy.",
+    });
+  });
+
+  it("runs allowed commands with project root as cwd", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(
+      projectRoot,
+      "package.json",
+      JSON.stringify({
+        scripts: {
+          build: "node -e \"console.log(process.cwd())\"",
+        },
+      }),
+    );
+    await mkdir(path.join(projectRoot, "nested"));
+
+    const result = await bashTool(
+      { command: "npm run build", cwd: "nested" },
+      { projectRoot },
+    );
+    const output = parseToolOutput(result.output);
+
+    expect(result.success).toBe(true);
+    expect(output).toMatchObject({
+      command: "npm run build",
+      decision: "allow",
+      exitCode: 0,
+      timedOut: false,
+      error: null,
+    });
+    expect(String(output.stdout)).toContain(projectRoot);
+    expect(String(output.stdout)).not.toContain(path.join(projectRoot, "nested"));
+  });
+
+  it("returns structured output for confirm rejection", async () => {
+    const projectRoot = await createTempProject();
+    const result = await bashTool(
+      { command: "python script.py", cwd: "." },
+      { projectRoot },
+    );
+    const output = parseToolOutput(result.output);
+
+    expect(result.success).toBe(false);
+    expect(output).toMatchObject({
+      command: "python script.py",
+      decision: "confirm",
+      exitCode: null,
+      stdout: "",
+      stderr: "",
+      timedOut: false,
+      error: "Command rejected by user.",
+    });
   });
 });
 

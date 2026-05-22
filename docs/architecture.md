@@ -90,7 +90,7 @@ All tools return:
 
 Permission prompts live in `src/permissions`.
 
-`bash` asks before running commands. `edit_file` performs one exact `oldText` to `newText` replacement, asks before writing files after showing a unified diff, and rejects missing or duplicate matches. Non-interactive runs default to rejection, which is safer for tests and automation.
+`bash` uses a deterministic allow/confirm/deny policy. Confirm-class commands ask before running, denied commands are rejected, and allowed verification commands can run directly. `edit_file` performs one exact `oldText` to `newText` replacement, asks before writing files after showing a unified diff, and rejects missing or duplicate matches. Non-interactive confirmation requests default to rejection, which is safer for tests and automation.
 
 ## Path Safety
 

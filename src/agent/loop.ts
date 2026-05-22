@@ -1,6 +1,5 @@
 import type { LLMMessage, LLMProvider } from "../llm/openai-compatible.js";
 import { configToPermissionPolicy, loadConfig } from "../config.js";
-import { runAfterEditHook } from "./hooks.js";
 import { loadProjectRules } from "./project-rules.js";
 import {
   createSessionTrace,
@@ -85,7 +84,7 @@ Available tools:
 - edit_file: replace exactly one oldText occurrence with newText, show a unified diff, and write only after explicit user approval. Include a short reason.
 
 Hooks:
-- After a successful edit_file call, NanoClaude automatically proposes running npm run build through the bash tool. Do not request a duplicate build unless another verification command is needed.`;
+- After a successful edit_file call, NanoClaude automatically runs configured after-edit verification commands through the bash permission policy. Do not request duplicate verification unless another command is needed.`;
 
 function buildSystemPrompt(rules: Awaited<ReturnType<typeof loadProjectRules>>): string {
   if (!rules) {
@@ -274,15 +273,6 @@ function applyTodoUpdate(
   return todos;
 }
 
-function editWasApplied(output: string): boolean {
-  try {
-    const parsed = JSON.parse(output) as { applied?: unknown };
-    return parsed.applied === true;
-  } catch {
-    return true;
-  }
-}
-
 export async function runAgent(input: AgentLoopInput): Promise<string> {
   const projectRoot = input.projectRoot ?? process.cwd();
   const config = await loadConfig(projectRoot);
@@ -294,6 +284,7 @@ export async function runAgent(input: AgentLoopInput): Promise<string> {
     permissionPolicy: configToPermissionPolicy(config),
     maxToolOutputChars: config.agent.maxToolOutputChars,
     commandTimeoutMs: config.verify.timeoutMs,
+    verifyAfterEdit: hooksEnabled ? config.verify.afterEdit : [],
   };
   const projectRules = rulesEnabled ? await loadProjectRules(projectRoot) : null;
   if (projectRules) {
@@ -399,45 +390,6 @@ export async function runAgent(input: AgentLoopInput): Promise<string> {
         }),
       });
 
-      if (
-        hooksEnabled &&
-        response.tool === "edit_file" &&
-        result.success &&
-        editWasApplied(result.output)
-      ) {
-        const hookExecution = await runAfterEditHook(toolContext);
-        console.log(
-          `[hook_result] ${hookExecution.hookName} success=${hookExecution.result.success}`,
-        );
-        if (!hookExecution.result.success && hookExecution.result.error) {
-          console.log(`[hook_result] ${hookExecution.hookName} error=${hookExecution.result.error}`);
-        }
-
-        recordToolCall(trace, hookExecution.tool, hookExecution.args, {
-          source: "hook",
-          hookName: hookExecution.hookName,
-        });
-        recordToolResult(
-          trace,
-          hookExecution.tool,
-          hookExecution.args,
-          hookExecution.result,
-          {
-            source: "hook",
-            hookName: hookExecution.hookName,
-          },
-        );
-
-        messages.push({
-          role: "user",
-          content: JSON.stringify({
-            type: "hook_result",
-            hook: hookExecution.hookName,
-            tool: hookExecution.tool,
-            result: hookExecution.result,
-          }),
-        });
-      }
     }
 
     const stoppedMessage = `Stopped after ${maxIterations} iterations without a final answer.`;

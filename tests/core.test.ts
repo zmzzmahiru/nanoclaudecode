@@ -50,6 +50,14 @@ function parseToolOutput(output: string): Record<string, unknown> {
   return JSON.parse(output) as Record<string, unknown>;
 }
 
+function allowNodePolicy() {
+  return {
+    allow: ["node"],
+    confirm: [],
+    deny: [],
+  };
+}
+
 afterEach(async () => {
   vi.restoreAllMocks();
 
@@ -275,6 +283,255 @@ describe("filesystem tools", () => {
       "const keep = true;\nconst target = 'new';\nconst alsoKeep = true;\n",
     );
   });
+
+  it("edit_file runs configured verification after a successful edit", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(projectRoot, "README.md", "old\n");
+
+    const result = await editFileTool(
+      {
+        path: "README.md",
+        oldText: "old",
+        newText: "new",
+        reason: "verify after edit",
+      },
+      {
+        projectRoot,
+        verifyAfterEdit: [`node -e "console.log('verified')"`],
+        permissionPolicy: allowNodePolicy(),
+      },
+    );
+    const output = parseToolOutput(result.output);
+    const verification = output.verification as {
+      ran: boolean;
+      passed: boolean;
+      results: Array<Record<string, unknown>>;
+    };
+
+    expect(result.success).toBe(true);
+    expect(verification.ran).toBe(true);
+    expect(verification.passed).toBe(true);
+    expect(verification.results[0]).toMatchObject({
+      command: `node -e "console.log('verified')"`,
+      decision: "allow",
+      exitCode: 0,
+      timedOut: false,
+      error: null,
+    });
+    expect(String(verification.results[0]?.stdout)).toContain("verified");
+  });
+
+  it("edit_file uses configured afterEdit commands", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(projectRoot, "README.md", "old\n");
+    await writeProjectFile(
+      projectRoot,
+      "nanoclaude.config.json",
+      JSON.stringify({
+        verify: {
+          afterEdit: [`node -e "console.log('from-config')"`],
+        },
+        permissions: {
+          allowCommands: ["node"],
+        },
+      }),
+    );
+    const config = await loadConfig(projectRoot);
+
+    const result = await editFileTool(
+      {
+        path: "README.md",
+        oldText: "old",
+        newText: "new",
+        reason: "use configured command",
+      },
+      {
+        projectRoot,
+        verifyAfterEdit: config.verify.afterEdit,
+        permissionPolicy: configToPermissionPolicy(config),
+      },
+    );
+    const output = parseToolOutput(result.output);
+    const verification = output.verification as {
+      results: Array<Record<string, unknown>>;
+    };
+
+    expect(verification.results).toHaveLength(1);
+    expect(verification.results[0]?.command).toBe(
+      `node -e "console.log('from-config')"`,
+    );
+  });
+
+  it("edit_file does not run verification when afterEdit is empty", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(projectRoot, "README.md", "old\n");
+
+    const result = await editFileTool(
+      {
+        path: "README.md",
+        oldText: "old",
+        newText: "new",
+        reason: "empty verification",
+      },
+      {
+        projectRoot,
+        verifyAfterEdit: [],
+        permissionPolicy: allowNodePolicy(),
+      },
+    );
+    const output = parseToolOutput(result.output);
+
+    expect(result.success).toBe(true);
+    expect(output.verification).toMatchObject({
+      ran: false,
+      results: [],
+      passed: true,
+      message: "No verification configured.",
+    });
+  });
+
+  it("edit_file does not run verification after missing oldText", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(projectRoot, "README.md", "old\n");
+
+    const result = await editFileTool(
+      {
+        path: "README.md",
+        oldText: "missing",
+        newText: "new",
+        reason: "missing oldText",
+      },
+      {
+        projectRoot,
+        verifyAfterEdit: [`node -e "require('fs').writeFileSync('marker.txt','ran')"`],
+        permissionPolicy: allowNodePolicy(),
+      },
+    );
+    const output = parseToolOutput(result.output);
+
+    expect(result.success).toBe(false);
+    expect(output.verification).toMatchObject({ ran: false, results: [] });
+    await expect(readFile(path.join(projectRoot, "marker.txt"), "utf8")).rejects.toThrow();
+  });
+
+  it("edit_file does not run verification after duplicate oldText", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(projectRoot, "README.md", "old\nold\n");
+
+    const result = await editFileTool(
+      {
+        path: "README.md",
+        oldText: "old",
+        newText: "new",
+        reason: "duplicate oldText",
+      },
+      {
+        projectRoot,
+        verifyAfterEdit: [`node -e "require('fs').writeFileSync('marker.txt','ran')"`],
+        permissionPolicy: allowNodePolicy(),
+      },
+    );
+    const output = parseToolOutput(result.output);
+
+    expect(result.success).toBe(false);
+    expect(output.verification).toMatchObject({ ran: false, results: [] });
+    await expect(readFile(path.join(projectRoot, "marker.txt"), "utf8")).rejects.toThrow();
+  });
+
+  it("edit_file does not run verification after a no-op edit", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(projectRoot, "README.md", "same\n");
+
+    const result = await editFileTool(
+      {
+        path: "README.md",
+        oldText: "same",
+        newText: "same",
+        reason: "no-op edit",
+      },
+      {
+        projectRoot,
+        verifyAfterEdit: [`node -e "require('fs').writeFileSync('marker.txt','ran')"`],
+        permissionPolicy: allowNodePolicy(),
+      },
+    );
+    const output = parseToolOutput(result.output);
+
+    expect(result.success).toBe(true);
+    expect(output).toMatchObject({ applied: false });
+    expect(output.verification).toMatchObject({ ran: false, results: [] });
+    await expect(readFile(path.join(projectRoot, "marker.txt"), "utf8")).rejects.toThrow();
+  });
+
+  it("edit_file includes failing verification result", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(projectRoot, "README.md", "old\n");
+
+    const result = await editFileTool(
+      {
+        path: "README.md",
+        oldText: "old",
+        newText: "new",
+        reason: "failing verification",
+      },
+      {
+        projectRoot,
+        verifyAfterEdit: [`node -e "console.error('bad'); process.exit(2)"`],
+        permissionPolicy: allowNodePolicy(),
+      },
+    );
+    const output = parseToolOutput(result.output);
+    const verification = output.verification as {
+      passed: boolean;
+      results: Array<Record<string, unknown>>;
+    };
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Verification failed for command");
+    expect(verification.passed).toBe(false);
+    expect(verification.results[0]).toMatchObject({
+      exitCode: 2,
+      timedOut: false,
+      error: "Command exited with code 2.",
+    });
+    expect(String(verification.results[0]?.stderr)).toContain("bad");
+  });
+
+  it("edit_file does not execute denied verification commands", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(projectRoot, "README.md", "old\n");
+
+    const result = await editFileTool(
+      {
+        path: "README.md",
+        oldText: "old",
+        newText: "new",
+        reason: "denied verification",
+      },
+      {
+        projectRoot,
+        verifyAfterEdit: ["sudo npm test"],
+      },
+    );
+    const output = parseToolOutput(result.output);
+    const verification = output.verification as {
+      passed: boolean;
+      results: Array<Record<string, unknown>>;
+    };
+
+    expect(result.success).toBe(false);
+    expect(verification.passed).toBe(false);
+    expect(verification.results[0]).toMatchObject({
+      command: "sudo npm test",
+      decision: "deny",
+      exitCode: null,
+      stdout: "",
+      stderr: "",
+      timedOut: false,
+      error: "Command denied by policy.",
+    });
+  });
+
 });
 
 describe("session trace", () => {

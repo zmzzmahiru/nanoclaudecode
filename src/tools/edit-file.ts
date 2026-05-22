@@ -2,6 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { confirmEdit } from "../permissions/confirm-edit.js";
+import { bashTool } from "./bash.js";
 import {
   resolveInsideProject,
   resolveProjectRoot,
@@ -22,6 +23,24 @@ interface EditFileOutput {
   applied: boolean;
   reason: string;
   diff: string;
+  verification: EditVerification;
+  error: string | null;
+}
+
+interface EditVerification {
+  ran: boolean;
+  results: VerificationResult[];
+  passed: boolean;
+  message?: string;
+}
+
+interface VerificationResult {
+  command: string;
+  decision: string;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
   error: string | null;
 }
 
@@ -65,6 +84,15 @@ function formatOutput(output: EditFileOutput): string {
   return JSON.stringify(output, null, 2);
 }
 
+function noVerification(message = "Verification was not run."): EditVerification {
+  return {
+    ran: false,
+    results: [],
+    passed: true,
+    message,
+  };
+}
+
 function failedResult(input: {
   path: string;
   reason: string;
@@ -78,6 +106,7 @@ function failedResult(input: {
       applied: false,
       reason: input.reason,
       diff: input.diff ?? "",
+      verification: noVerification(),
       error: input.error,
     }),
     error: input.error,
@@ -159,6 +188,73 @@ function createUnifiedDiff(
   return diffLines.join("\n");
 }
 
+async function runVerification(
+  context: ToolContext,
+): Promise<EditVerification> {
+  const commands = context.verifyAfterEdit ?? [];
+
+  if (commands.length === 0) {
+    return noVerification("No verification configured.");
+  }
+
+  const results: VerificationResult[] = [];
+
+  for (const command of commands) {
+    console.log(`[hook] after_edit: ${command}`);
+    const result = await bashTool({ command, cwd: "." }, context);
+    const parsed = parseVerificationResult(command, result.output, result.error);
+    results.push(parsed);
+    console.log(`[hook_result] after_edit success=${result.success}`);
+
+    if (!result.success) {
+      if (result.error) {
+        console.log(`[hook_result] after_edit error=${result.error}`);
+      }
+
+      return {
+        ran: true,
+        results,
+        passed: false,
+      };
+    }
+  }
+
+  return {
+    ran: true,
+    results,
+    passed: true,
+  };
+}
+
+function parseVerificationResult(
+  command: string,
+  output: string,
+  error: string | null,
+): VerificationResult {
+  try {
+    const parsed = JSON.parse(output) as Partial<VerificationResult>;
+    return {
+      command: parsed.command ?? command,
+      decision: parsed.decision ?? "confirm",
+      exitCode: parsed.exitCode ?? null,
+      stdout: parsed.stdout ?? "",
+      stderr: parsed.stderr ?? "",
+      timedOut: parsed.timedOut ?? false,
+      error: parsed.error ?? error,
+    };
+  } catch {
+    return {
+      command,
+      decision: "confirm",
+      exitCode: null,
+      stdout: "",
+      stderr: "",
+      timedOut: false,
+      error: error ?? "Unable to parse verification result.",
+    };
+  }
+}
+
 export async function editFileTool(
   args: EditFileArgs,
   context: ToolContext,
@@ -197,6 +293,7 @@ export async function editFileTool(
           applied: false,
           reason,
           diff: "",
+          verification: noVerification("No file change was needed."),
           error: null,
         }),
         error: null,
@@ -216,17 +313,24 @@ export async function editFileTool(
     }
 
     await writeFile(filePath, updated, "utf8");
+    const verification = await runVerification(context);
+    const verificationError = verification.passed
+      ? null
+      : `Verification failed for command: ${
+          verification.results.at(-1)?.command ?? "unknown"
+        }`;
 
     return {
-      success: true,
+      success: verification.passed,
       output: formatOutput({
         path: relativePath,
         applied: true,
         reason,
         diff,
-        error: null,
+        verification,
+        error: verificationError,
       }),
-      error: null,
+      error: verificationError,
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);

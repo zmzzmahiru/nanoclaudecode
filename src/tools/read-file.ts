@@ -14,6 +14,7 @@ export interface ToolContext {
   permissionPolicy?: PermissionPolicy;
   maxToolOutputChars?: number;
   commandTimeoutMs?: number;
+  verifyAfterEdit?: string[];
 }
 
 export interface ReadFileArgs {

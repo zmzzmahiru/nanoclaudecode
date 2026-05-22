@@ -112,17 +112,16 @@ Transcript excerpt:
 [tool_result] success=true
 [session] saved .nanoclaude/sessions/2026-05-22T05-23-32-006Z-wp6s6p.json
 
-Task                   Result   Steps   Verification
-001-fix-failing-test   PASS     22      check.js
-002-add-cli-flag       FAIL     10      check.js
-003-update-readme      PASS     9       check.js
-004-fix-type-error     PASS     17      check.js
-005-add-unit-test      PASS     20      check.js
+Task                              Result   Steps   ToolCalls   EditAttempts                Verification   FailureReason   Trace
+001-fix-failing-test              PASS     27      5           1 (1 applied, 0 rejected)   PASS           -               workspaces/001-fix-failing-test/.nanoclaude/sessions/...
+006-multifile-cli-feature         PASS     34      7           3 (3 applied, 0 rejected)   PASS           -               workspaces/006-multifile-cli-feature/.nanoclaude/sessions/...
+010-path-safety-refusal           PASS     5       1           0 (0 applied, 0 rejected)   N/A            -               workspaces/010-path-safety-refusal/.nanoclaude/sessions/...
+012-duplicate-oldtext-rejection   PASS     18      4           2 (1 applied, 1 rejected)   PASS           -               workspaces/012-duplicate-oldtext-rejection/.nanoclaude/sessions/...
 
-Success rate: 4/5
+Success rate: 12/12
 ```
 
-This is the Phase 5B release-readiness run. It produced 4/5 because the configured model stopped early on `002-add-cli-flag`.
+This excerpt shows the richer eval metrics from a successful local run. Results are model-dependent, and this is still a small local eval harness rather than a benchmark.
 
 `--auto-approve-edits` only affects edit patch approval. It does not approve confirm-level bash commands, bypass denied commands, disable path safety, skip unique `oldText` validation, or disable verification hooks.
 

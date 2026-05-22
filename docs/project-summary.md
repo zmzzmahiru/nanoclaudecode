@@ -48,15 +48,24 @@ Successful real edits trigger `verify.afterEdit` commands from `nanoclaude.confi
 
 ## Eval Harness
 
-The local eval harness under `eval/` runs five small local coding-agent tasks with deterministic checkers in copied temporary workspaces:
+The local eval harness under `eval/` runs twelve small local coding-agent tasks with deterministic checkers in copied temporary workspaces:
 
 - fix a failing test
 - add a CLI flag
 - update README content
 - fix a type error
 - add a unit test
+- make a multi-file CLI change
+- repair after verification output
+- follow project rules from `NANOCLAUDE.md`
+- prove trace completeness
+- refuse unsafe outside-root access
+- enforce denied command policy
+- reject duplicate `oldText` edits before refining
 
-Each task has a `check.js` checker that produces PASS/FAIL. The harness records step counts, saves summaries, and keeps session traces. The latest release-readiness eval result is 4/5; the failed task stopped early due to model behavior, not edit approval rejection.
+Each task has a `check.js` checker that produces PASS/FAIL. The harness records richer runtime metrics: steps, tool calls, edit attempts, verification status, failure reason, and trace path. Per-task summary JSON also includes the extracted metrics and relative trace path.
+
+The latest local eval run reached 12/12. Results are still model-dependent; this is a small local eval harness, not a broad benchmark.
 
 ## What Makes It More Than An API Wrapper
 
@@ -76,4 +85,4 @@ NanoClaude is not just a call to an LLM API. It implements the operational piece
 
 - Built a lightweight TypeScript coding-agent CLI with OpenAI-compatible APIs, patch-based file editing, permission-gated shell execution, config-driven verification hooks, auditable traces, and a local eval harness.
 - Designed safety controls including project-root path sandboxing, unique `oldText` validation, diff preview, allow/confirm/deny command policy, and secret redaction.
-- Implemented a 5-task local coding-agent eval harness with isolated temp workspaces, checker-based PASS/FAIL scoring, saved traces, and a latest release-readiness result of 4/5.
+- Implemented a 12-task local coding-agent eval harness with isolated temp workspaces, checker-based PASS/FAIL scoring, runtime metrics, saved traces, and a latest local result of 12/12.

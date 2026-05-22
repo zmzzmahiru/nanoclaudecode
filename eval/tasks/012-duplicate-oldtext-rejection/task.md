@@ -1,4 +1,6 @@
-Update only the second item from `status: pending` to `status: done`.
+Update only the second item in `items.txt` from `status: pending` to
+`status: done`.
 
-First try the ambiguous replacement with oldText `status: pending`, observe the
-duplicate oldText rejection, then make a targeted safe edit for the second item.
+First call `edit_file` on `items.txt` with oldText exactly `status: pending` so
+the duplicate oldText rejection is recorded. Then make a targeted safe edit for
+only the second item.

@@ -30,10 +30,38 @@ export interface EvalResult {
   taskId: string;
   result: "PASS" | "FAIL";
   steps: number | null;
+  toolCalls: number | null;
+  editAttempts: string;
   verification: string;
+  failureReason: FailureReason;
   summaryPath: string;
   tracePath: string | null;
+  trace: string;
   error: string | null;
+}
+
+export type VerificationStatus = "PASS" | "FAIL" | "N/A" | "UNKNOWN";
+
+export type FailureReason =
+  | "-"
+  | "checker_failed"
+  | "model_stopped_early"
+  | "verification_failed"
+  | "permission_denied"
+  | "path_safety_rejection"
+  | "duplicate_oldtext_rejection"
+  | "no_edit_applied"
+  | "unknown";
+
+export interface EvalMetrics {
+  steps: number | null;
+  toolCalls: number | null;
+  editAttempts: {
+    total: number;
+    applied: number;
+    rejected: number;
+  } | null;
+  verification: VerificationStatus;
 }
 
 export function evalAgentOptions(): {
@@ -198,14 +226,110 @@ export async function extractTraceStepCount(
   return null;
 }
 
+export async function extractEvalMetrics(
+  tracePath: string | null,
+): Promise<EvalMetrics> {
+  if (!tracePath) {
+    return emptyMetrics("UNKNOWN");
+  }
+
+  try {
+    const parsed = JSON.parse(await readFile(tracePath, "utf8")) as {
+      steps?: unknown[];
+      toolCalls?: unknown[];
+    };
+    const steps = Array.isArray(parsed.steps) ? parsed.steps : [];
+    const toolCalls = countToolCalls(steps, parsed.toolCalls);
+    const editAttempts = countEditAttempts(steps);
+
+    return {
+      steps: steps.length,
+      toolCalls,
+      editAttempts,
+      verification: classifyVerificationStatus(steps),
+    };
+  } catch {
+    return emptyMetrics("UNKNOWN");
+  }
+}
+
+export function classifyVerificationStatus(steps: unknown[]): VerificationStatus {
+  const verificationSteps = steps
+    .map(asRecord)
+    .filter((step) => step?.type === "verification");
+
+  if (verificationSteps.length === 0) {
+    return "N/A";
+  }
+
+  return verificationSteps.every((step) => step.passed === true) ? "PASS" : "FAIL";
+}
+
+export function classifyFailureReason(input: {
+  result: "PASS" | "FAIL";
+  metrics: EvalMetrics;
+  checker: CheckerResult;
+  agentError: string | null;
+  traceText?: string;
+}): FailureReason {
+  if (input.result === "PASS") {
+    return "-";
+  }
+
+  const traceText = input.traceText ?? "";
+
+  if (input.metrics.verification === "FAIL") {
+    return "verification_failed";
+  }
+
+  if (/permission_decision[\s\S]*"decision"\s*:\s*"deny"|Command denied by policy/i.test(traceText)) {
+    return "permission_denied";
+  }
+
+  if (/outside the project root|Absolute paths are not allowed/i.test(traceText)) {
+    return "path_safety_rejection";
+  }
+
+  if (/oldText appears multiple times/i.test(traceText)) {
+    return "duplicate_oldtext_rejection";
+  }
+
+  if (input.metrics.editAttempts && input.metrics.editAttempts.applied === 0) {
+    return "no_edit_applied";
+  }
+
+  if (/Stopped after \d+ iterations/i.test(traceText) || input.agentError) {
+    return "model_stopped_early";
+  }
+
+  if (!input.checker.passed) {
+    return "checker_failed";
+  }
+
+  return "unknown";
+}
+
 export function formatResultTable(results: EvalResult[]): string {
   const rows = [
-    ["Task", "Result", "Steps", "Verification"],
+    [
+      "Task",
+      "Result",
+      "Steps",
+      "ToolCalls",
+      "EditAttempts",
+      "Verification",
+      "FailureReason",
+      "Trace",
+    ],
     ...results.map((result) => [
       result.taskId,
       result.result,
       result.steps === null ? "-" : String(result.steps),
+      result.toolCalls === null ? "-" : String(result.toolCalls),
+      result.editAttempts,
       result.verification,
+      result.failureReason,
+      result.trace,
     ]),
   ];
   const widths = rows[0]?.map((_, column) =>
@@ -224,6 +348,55 @@ export function formatResultTable(results: EvalResult[]): string {
 
 export function parsePassFail(result: CheckerResult): "PASS" | "FAIL" {
   return result.passed ? "PASS" : "FAIL";
+}
+
+export function formatEditAttempts(metrics: EvalMetrics): string {
+  if (!metrics.editAttempts) {
+    return "-";
+  }
+
+  return `${metrics.editAttempts.total} (${metrics.editAttempts.applied} applied, ${metrics.editAttempts.rejected} rejected)`;
+}
+
+export function buildSummaryPayload(input: {
+  taskId: string;
+  result: "PASS" | "FAIL";
+  metrics: EvalMetrics;
+  failureReason: FailureReason;
+  checkerName: string;
+  workspace: string;
+  tracePath: string | null;
+  relativeTracePath: string;
+  agentOutput: string;
+  agentError: string | null;
+  agentLog: string;
+  checker: CheckerResult;
+}): Record<string, unknown> {
+  return {
+    taskId: input.taskId,
+    result: input.result,
+    metrics: {
+      ...input.metrics,
+      editAttempts: input.metrics.editAttempts,
+      failureReason: input.failureReason,
+    },
+    steps: input.metrics.steps,
+    toolCalls: input.metrics.toolCalls,
+    editAttempts: formatEditAttempts(input.metrics),
+    verification: input.metrics.verification,
+    failureReason: input.failureReason,
+    checkerName: input.checkerName,
+    workspace: input.workspace,
+    tracePath: input.tracePath,
+    relativeTracePath: input.relativeTracePath,
+    agentOutput: capAndRedact(input.agentOutput, MAX_CAPTURE_CHARS),
+    agentError: input.agentError
+      ? capAndRedact(input.agentError, MAX_CAPTURE_CHARS)
+      : null,
+    agentLog: capAndRedact(input.agentLog, MAX_CAPTURE_CHARS),
+    checker: input.checker,
+    autoApproveEdits: true,
+  };
 }
 
 async function runSingleTask(input: {
@@ -259,26 +432,38 @@ async function runSingleTask(input: {
   const checker = await runChecker(input.task.checkerPath, workspace, CHECK_TIMEOUT_MS, {
     NANOCLAUDE_TRACE_PATH: tracePath ?? "",
   });
-  const steps = await extractTraceStepCount(tracePath);
+  const metrics = await extractEvalMetrics(tracePath);
   const result = parsePassFail(checker);
   const summaryPath = path.join(input.runRoot, `${input.task.id}.summary.json`);
+  const traceText = tracePath ? await readOptionalText(tracePath) : "";
+  const failureReason = classifyFailureReason({
+    result,
+    metrics,
+    checker,
+    agentError,
+    traceText,
+  });
+  const relativeTracePath = tracePath
+    ? path.relative(input.runRoot, tracePath).split(path.sep).join("/")
+    : path.basename(summaryPath);
 
   await writeFile(
     summaryPath,
     `${JSON.stringify(
-      {
+      buildSummaryPayload({
         taskId: input.task.id,
         result,
-        steps,
-        verification: input.task.checkerName,
+        failureReason,
+        checkerName: input.task.checkerName,
         workspace,
         tracePath,
-        agentOutput: capAndRedact(agentOutput, MAX_CAPTURE_CHARS),
-        agentError: agentError ? capAndRedact(agentError, MAX_CAPTURE_CHARS) : null,
-        agentLog: capAndRedact(logs.join("\n"), MAX_CAPTURE_CHARS),
+        relativeTracePath,
+        metrics,
+        agentOutput,
+        agentError,
+        agentLog: logs.join("\n"),
         checker,
-        autoApproveEdits: true,
-      },
+      }),
       null,
       2,
     )}\n`,
@@ -288,10 +473,14 @@ async function runSingleTask(input: {
   return {
     taskId: input.task.id,
     result,
-    steps,
-    verification: input.task.checkerName,
+    steps: metrics.steps,
+    toolCalls: metrics.toolCalls,
+    editAttempts: formatEditAttempts(metrics),
+    verification: metrics.verification,
+    failureReason,
     summaryPath,
     tracePath,
+    trace: relativeTracePath,
     error: agentError ?? checker.error,
   };
 }
@@ -340,6 +529,62 @@ async function exists(filePath: string): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+function emptyMetrics(verification: VerificationStatus): EvalMetrics {
+  return {
+    steps: null,
+    toolCalls: null,
+    editAttempts: null,
+    verification,
+  };
+}
+
+function countToolCalls(
+  steps: unknown[],
+  legacyToolCalls: unknown[] | undefined,
+): number | null {
+  if (steps.length > 0) {
+    return steps.filter((step) => asRecord(step)?.type === "tool_call").length;
+  }
+
+  return Array.isArray(legacyToolCalls) ? legacyToolCalls.length : null;
+}
+
+function countEditAttempts(steps: unknown[]): EvalMetrics["editAttempts"] {
+  if (steps.length === 0) {
+    return null;
+  }
+
+  const editToolCalls = steps.filter((step) => {
+    const record = asRecord(step);
+    return record?.type === "tool_call" && record.tool === "edit_file";
+  }).length;
+  const editEvents = steps
+    .map(asRecord)
+    .filter((step) => step?.type === "edit_applied");
+  const applied = editEvents.filter((step) => step.applied === true).length;
+  const rejected = editEvents.filter((step) => step.applied !== true).length;
+
+  return {
+    total: editToolCalls || editEvents.length,
+    applied,
+    rejected,
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+async function readOptionalText(filePath: string): Promise<string> {
+  try {
+    return await readFile(filePath, "utf8");
+  } catch {
+    return "";
   }
 }
 

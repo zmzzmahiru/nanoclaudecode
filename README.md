@@ -40,8 +40,8 @@ NanoClaude exists to make those concerns explicit and readable:
 | Config | `nanoclaude.config.json` for verification, permissions, and agent limits |
 | Verification | Successful real edits trigger configured `verify.afterEdit` commands |
 | Traces | Structured session trace events with capped and redacted output |
-| Eval harness | Five small local coding tasks with deterministic checkers under `eval/tasks` |
-| Tests | Vitest suite for non-LLM core logic; currently 57 tests |
+| Eval harness | Twelve small local coding tasks with deterministic checkers under `eval/tasks` |
+| Tests | Vitest suite for non-LLM core logic; currently 62 tests |
 
 ## Quick Start
 
@@ -90,15 +90,14 @@ Run the local eval harness:
 npm run eval
 ```
 
-Latest release-readiness eval result from this repository:
+Latest local eval run from this repository:
 
 ```text
-Success rate: 4/5
+Success rate: 12/12
 ```
 
-The Phase 5B release-audit rerun produced 4/5 because the configured model
-stopped early on `002-add-cli-flag`. This is a small local eval harness, not
-SWE-bench and not a broad benchmark.
+Results are model-dependent. This is a small local eval harness with
+deterministic checkers, not SWE-bench and not a broad benchmark.
 
 ## CLI Usage
 
@@ -273,6 +272,13 @@ eval/
     003-update-readme/
     004-fix-type-error/
     005-add-unit-test/
+    006-multifile-cli-feature/
+    007-verification-failure-repair/
+    008-project-rules-following/
+    009-trace-completeness/
+    010-path-safety-refusal/
+    011-denied-command-policy/
+    012-duplicate-oldtext-rejection/
 ```
 
 `npm run eval`:
@@ -283,27 +289,41 @@ eval/
 - auto-approves `edit_file` patches only in those copied workspaces
 - keeps bash allow/confirm/deny policy active
 - runs each task's `check.js`
-- reports PASS/FAIL, step count, and checker name
-- saves summaries and traces under `eval/results/`
+- reports PASS/FAIL, step count, tool call count, edit attempts,
+  verification status, failure reason, and trace path
+- saves summaries, metrics, and traces under `eval/results/`
 
-Latest release-readiness local run:
+Eval output columns:
 
 ```text
-Task                   Result   Steps   Verification
-001-fix-failing-test   PASS     22      check.js
-002-add-cli-flag       FAIL     10      check.js
-003-update-readme      PASS     9       check.js
-004-fix-type-error     PASS     17      check.js
-005-add-unit-test      PASS     20      check.js
+Task
+Result
+Steps
+ToolCalls
+EditAttempts
+Verification
+FailureReason
+Trace
+```
 
-Success rate: 4/5
+Per-task summary JSON includes `metrics`, `toolCalls`, `editAttempts`,
+`verification`, `failureReason`, and `relativeTracePath`.
+
+Latest local run:
+
+```text
+Task                              Result   Steps   ToolCalls   EditAttempts                Verification   FailureReason   Trace
+001-fix-failing-test              PASS     27      5           1 (1 applied, 0 rejected)   PASS           -               workspaces/001-fix-failing-test/.nanoclaude/sessions/...
+006-multifile-cli-feature         PASS     34      7           3 (3 applied, 0 rejected)   PASS           -               workspaces/006-multifile-cli-feature/.nanoclaude/sessions/...
+010-path-safety-refusal           PASS     5       1           0 (0 applied, 0 rejected)   N/A            -               workspaces/010-path-safety-refusal/.nanoclaude/sessions/...
+012-duplicate-oldtext-rejection   PASS     18      4           2 (1 applied, 1 rejected)   PASS           -               workspaces/012-duplicate-oldtext-rejection/.nanoclaude/sessions/...
+
+Success rate: 12/12
 ```
 
 This eval is intentionally small and local. The checkers are deterministic, but
 agent success is model-dependent. It is useful for regression checks and demos,
 not for broad performance claims.
-
-Eval success still depends on the configured model; the Phase 5B release-audit rerun produced 4/5.
 
 ## Architecture
 
@@ -337,6 +357,8 @@ npm test
 The test suite does not call a real LLM. It focuses on deterministic behavior:
 path safety, tool results, edit validation, bash permissions, config loading,
 trace redaction, eval harness utilities, and CLI parsing.
+
+Current suite size: 62 Vitest tests.
 
 ## Limitations
 

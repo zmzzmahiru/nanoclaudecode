@@ -30,9 +30,13 @@ import { resolveInsideProject } from "../src/tools/path-safety.js";
 import { readFileTool } from "../src/tools/read-file.js";
 import { parseCliArgs } from "../src/index.js";
 import {
+  buildSummaryPayload,
   createTaskWorkspace,
+  classifyFailureReason,
+  classifyVerificationStatus,
   discoverEvalTasks,
   evalAgentOptions,
+  extractEvalMetrics,
   extractTraceStepCount,
   formatResultTable,
   parsePassFail,
@@ -1319,18 +1323,26 @@ describe("eval harness", () => {
         taskId: "001-fix-failing-test",
         result: "PASS",
         steps: 8,
-        verification: "check.js",
+        toolCalls: 3,
+        editAttempts: "1 (1 applied, 0 rejected)",
+        verification: "PASS",
+        failureReason: "-",
         summaryPath: "summary.json",
         tracePath: "trace.json",
+        trace: "workspaces/001/.nanoclaude/sessions/trace.json",
         error: null,
       },
       {
         taskId: "002-add-cli-flag",
         result: "FAIL",
         steps: null,
-        verification: "check.js",
+        toolCalls: null,
+        editAttempts: "-",
+        verification: "UNKNOWN",
+        failureReason: "checker_failed",
         summaryPath: "summary.json",
         tracePath: null,
+        trace: "summary.json",
         error: "failed",
       },
     ];
@@ -1338,9 +1350,146 @@ describe("eval harness", () => {
     const table = formatResultTable(results);
 
     expect(table).toContain("Task");
+    expect(table).toContain("ToolCalls");
+    expect(table).toContain("EditAttempts");
+    expect(table).toContain("FailureReason");
+    expect(table).toContain("Trace");
     expect(table).toContain("001-fix-failing-test");
     expect(table).toContain("PASS");
     expect(table).toContain("Success rate: 1/2");
+  });
+
+  it("extracts eval metrics from trace steps", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(
+      projectRoot,
+      "trace.json",
+      JSON.stringify({
+        steps: [
+          { type: "tool_call", tool: "read_file" },
+          { type: "tool_result", tool: "read_file" },
+          { type: "tool_call", tool: "edit_file" },
+          { type: "edit_applied", applied: true },
+          { type: "verification", passed: true },
+          { type: "final", status: "success" },
+        ],
+      }),
+    );
+
+    await expect(
+      extractEvalMetrics(path.join(projectRoot, "trace.json")),
+    ).resolves.toEqual({
+      steps: 6,
+      toolCalls: 2,
+      editAttempts: {
+        total: 1,
+        applied: 1,
+        rejected: 0,
+      },
+      verification: "PASS",
+    });
+  });
+
+  it("classifies verification status", () => {
+    expect(classifyVerificationStatus([])).toBe("N/A");
+    expect(classifyVerificationStatus([{ type: "verification", passed: true }])).toBe(
+      "PASS",
+    );
+    expect(
+      classifyVerificationStatus([{ type: "verification", passed: false }]),
+    ).toBe("FAIL");
+  });
+
+  it("classifies failure reasons", () => {
+    const checker = {
+      passed: false,
+      exitCode: 1,
+      stdout: "",
+      stderr: "",
+      error: null,
+    };
+    const metrics = {
+      steps: 3,
+      toolCalls: 1,
+      editAttempts: { total: 1, applied: 0, rejected: 1 },
+      verification: "N/A" as const,
+    };
+
+    expect(
+      classifyFailureReason({
+        result: "FAIL",
+        metrics: { ...metrics, verification: "FAIL" },
+        checker,
+        agentError: null,
+      }),
+    ).toBe("verification_failed");
+    expect(
+      classifyFailureReason({
+        result: "FAIL",
+        metrics,
+        checker,
+        agentError: null,
+        traceText: "Command denied by policy.",
+      }),
+    ).toBe("permission_denied");
+    expect(
+      classifyFailureReason({
+        result: "FAIL",
+        metrics,
+        checker,
+        agentError: null,
+        traceText: "oldText appears multiple times",
+      }),
+    ).toBe("duplicate_oldtext_rejection");
+  });
+
+  it("builds summary JSON payload with eval metrics", () => {
+    const payload = buildSummaryPayload({
+      taskId: "001-demo",
+      result: "PASS",
+      metrics: {
+        steps: 6,
+        toolCalls: 2,
+        editAttempts: {
+          total: 1,
+          applied: 1,
+          rejected: 0,
+        },
+        verification: "PASS",
+      },
+      failureReason: "-",
+      checkerName: "check.js",
+      workspace: "workspace",
+      tracePath: "trace.json",
+      relativeTracePath: "workspaces/001-demo/.nanoclaude/sessions/trace.json",
+      agentOutput: "done",
+      agentError: null,
+      agentLog: "log",
+      checker: {
+        passed: true,
+        exitCode: 0,
+        stdout: "",
+        stderr: "",
+        error: null,
+      },
+    });
+
+    expect(payload).toMatchObject({
+      taskId: "001-demo",
+      steps: 6,
+      toolCalls: 2,
+      editAttempts: "1 (1 applied, 0 rejected)",
+      verification: "PASS",
+      failureReason: "-",
+      checkerName: "check.js",
+      autoApproveEdits: true,
+    });
+    expect(payload.metrics).toMatchObject({
+      steps: 6,
+      toolCalls: 2,
+      verification: "PASS",
+      failureReason: "-",
+    });
   });
 
   it("extracts trace step counts", async () => {

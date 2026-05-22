@@ -12,7 +12,7 @@ The edit path is intentionally narrow: `edit_file` takes `path`, `oldText`, `new
 
 Shell execution uses a deterministic allow/confirm/deny policy. Deny rules win, unknown commands default to confirm, and allowed verification commands can run from the project root. Project behavior is configurable through `nanoclaude.config.json`, including `verify.afterEdit`, timeouts, allowed/confirmed/denied commands, max steps, and output caps.
 
-Every run writes a redacted session trace with model messages, tool calls, tool results, permission decisions, edit events, verification events, and final status. A local eval harness runs five small coding-agent tasks in isolated temp workspaces and checks results with `check.js`. The latest release-readiness eval was 4/5; the failed task was model behavior variability where the model stopped early.
+Every run writes a redacted session trace with model messages, tool calls, tool results, permission decisions, edit events, verification events, and final status. A local eval harness runs twelve small coding-agent tasks in isolated temp workspaces and checks results with `check.js`. The latest local eval run reached 12/12, but results remain model-dependent.
 
 ## Key Design Decisions
 
@@ -52,11 +52,11 @@ Successful real edits trigger configured `verify.afterEdit` commands. These run 
 
 ### How does eval work?
 
-The eval harness discovers tasks under `eval/tasks`, copies each repo fixture into a temp results workspace, runs NanoClaude on `task.md`, runs the task's `check.js`, reports PASS/FAIL and step count, and saves summaries and traces.
+The eval harness discovers tasks under `eval/tasks`, copies each repo fixture into a temp results workspace, runs NanoClaude on `task.md`, runs the task's `check.js`, reports PASS/FAIL plus runtime metrics, and saves summaries and traces. Metrics include `Steps`, `ToolCalls`, `EditAttempts`, `Verification`, `FailureReason`, and `Trace`.
 
-### Why did the latest eval get 4/5 instead of 5/5?
+### What does the latest 12/12 eval result mean?
 
-The latest release-readiness run got 4/5 because the configured model inspected `002-add-cli-flag` and stopped early without applying an edit. It was not caused by edit approval rejection; auto-approval was active for eval temp workspaces. This is a useful reminder that the harness measures model behavior too.
+The latest local run completed all twelve small tasks successfully with the configured model and deterministic checkers. It is useful engineering evidence for this repository, but it is not a guarantee: success can vary by model, prompt behavior, and environment.
 
 ### What are the limitations?
 
@@ -70,4 +70,4 @@ Near-term improvements would be richer patch application, more eval tasks, resum
 
 - Built a lightweight TypeScript coding-agent CLI with OpenAI-compatible APIs, patch-based file editing, permission-gated shell execution, config-driven verification hooks, auditable traces, and a local eval harness.
 - Designed safety controls including project-root path sandboxing, unique `oldText` validation, diff preview, allow/confirm/deny command policy, and secret redaction.
-- Implemented a 5-task local coding-agent eval harness with isolated temp workspaces, checker-based PASS/FAIL scoring, saved traces, and a latest release-readiness result of 4/5.
+- Implemented a 12-task local coding-agent eval harness with isolated temp workspaces, checker-based PASS/FAIL scoring, runtime metrics, saved traces, and a latest local result of 12/12.

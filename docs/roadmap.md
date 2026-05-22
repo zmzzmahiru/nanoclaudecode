@@ -17,7 +17,7 @@
 | v10 | Packaged CLI with help, version, iteration, hook, and rules flags |
 | v11 | Documentation, demo material, examples, and GitHub polish |
 | Phase 3 | `nanoclaude.config.json`, configurable verification, permission policy wiring, and improved traces |
-| Phase 4 | Local five-task eval harness and explicit edit auto-approval for eval/CI workspaces |
+| Phase 4 | Local eval harness, explicit edit auto-approval for eval/CI workspaces, twelve task fixtures, and richer eval metrics |
 
 ## Future Ideas
 
@@ -41,9 +41,9 @@ Support structured patches or multi-file edits while keeping diff previews and a
 
 Run commands inside a constrained environment for stronger safety around build scripts and test execution.
 
-### Multi-Provider Benchmarks
+### Multi-Provider Comparisons
 
-Compare OpenAI-compatible providers on tool-call reliability, JSON formatting, latency, and cost across the same benchmark prompts.
+Compare OpenAI-compatible providers on tool-call reliability, JSON formatting, latency, and cost across the same small local task prompts.
 
 ## Non-Goals For Now
 

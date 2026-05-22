@@ -1,64 +1,182 @@
 # NanoClaude Demo Transcript
 
-This transcript is illustrative. It shows the kind of interaction NanoClaude is designed to make visible: rules, tool calls, approvals, hooks, traces, and final summary.
+This is a realistic terminal-style demo for a small failing-test task. It is written to show the mechanics NanoClaude makes visible: file inspection, patch proposal, approval behavior, verification, and trace output.
 
-## Command
+## Setup
+
+Environment:
 
 ```bash
-npm run dev -- "Add one sentence to README.md explaining that NanoClaude is educational, then verify the build"
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_API_KEY=...
+LLM_MODEL=...
 ```
 
-## Transcript
+Project config:
+
+```json
+{
+  "verify": {
+    "afterEdit": ["npm test"],
+    "timeoutMs": 30000
+  },
+  "permissions": {
+    "allowCommands": ["npm test"],
+    "confirmCommands": ["npm install", "rm", "mv", "cp"],
+    "denyCommands": ["sudo", "curl", "wget"]
+  },
+  "agent": {
+    "maxSteps": 20,
+    "maxToolOutputChars": 12000
+  }
+}
+```
+
+## Interactive Run
+
+Command:
+
+```bash
+npm run dev -- "Fix the failing test in this project"
+```
+
+Transcript:
 
 ```text
 [rules] loaded NANOCLAUDE.md
-[todo] in_progress: Inspect README
-[todo] pending: Edit README
-[todo] pending: Verify build
 
-[tool_call] read_file {"path":"README.md"}
+[tool_call] list_files {"path":"."}
 [tool_result] success=true
 
-[todo] done: Inspect README
-[todo] in_progress: Edit README
+[tool_call] read_file {"path":"package.json"}
+[tool_result] success=true
 
-[tool_call] edit_file {"path":"README.md","oldText":"<93 chars>","newText":"<151 chars>","reason":"Add educational positioning"}
+[tool_call] read_file {"path":"test.js"}
+[tool_result] success=true
 
-[edit_file] Proposed changes for README.md:
---- README.md
-+++ README.md
-@@ -1,5 +1,5 @@
- # NanoClaude
+[tool_call] read_file {"path":"src/math.js"}
+[tool_result] success=true
 
--A lightweight TypeScript AI coding-agent framework with JSON tool calling, approval-gated edits, session traces, and a packaged CLI.
-+A lightweight TypeScript AI coding-agent framework with JSON tool calling, approval-gated edits, session traces, and a packaged CLI. The project is intentionally small so the core agent mechanics are easy to study.
+[tool_call] edit_file {"path":"src/math.js","oldText":"<22 chars>","newText":"<22 chars>","reason":"Fix subtract function to actually subtract instead of add"}
 
- NanoClaude is a small, readable implementation of the core ideas behind coding agents: an LLM loop, tools, permissions, project rules, planning, verification hooks, and test coverage.
+[edit_file] Proposed changes for src/math.js:
+--- src/math.js
++++ src/math.js
+@@ -1,4 +1,4 @@
+ export function subtract(left, right) {
+-  return left + right;
++  return left - right;
+ }
 
 [edit_file] Apply this change? y
+
+[hook] after_edit: npm test
+[hook_result] after_edit success=true
 [tool_result] success=true
 
-[hook] after_edit: npm run build
-[bash] Run command in C:\path\to\nanoclaude: npm run build y/N y
+[session] saved .nanoclaude/sessions/2026-05-22T05-23-32-006Z-demo.json
 
-> nanoclaude@1.0.0 build
-> tsc
-
-[hook_result] after_edit success=true
-
-[todo] done: Edit README
-[todo] done: Verify build
-
-[session] saved .nanoclaude/sessions/2026-05-21T00-00-00-000Z-demo01.json
-
-Updated README.md with a short educational-positioning sentence and verified the TypeScript build.
+Fixed the failing test by correcting subtract() to use subtraction. Verification passed with npm test.
 ```
 
-## What To Point Out In A Demo
+What happened:
 
-- Rules are loaded before the model acts.
-- Tool calls are visible.
-- File edits show a unified diff before writing.
-- The user approves side effects.
-- The `after_edit` hook suggests verification without bypassing approval.
-- A redacted JSON trace is saved for auditability.
+- NanoClaude inspected the project before editing.
+- `edit_file` proposed an exact local replacement.
+- The user saw a unified diff before the file was written.
+- The write required manual approval.
+- The successful edit triggered `verify.afterEdit`.
+- `npm test` ran through the bash permission policy.
+- The session trace recorded the model messages, tool calls, edit event, verification event, and final output.
+
+## Eval / CI Run
+
+The eval harness runs against copied temp workspaces and uses explicit edit auto-approval:
+
+```bash
+npm run eval
+```
+
+Transcript excerpt:
+
+```text
+[eval] auto-approving edit_file patches in temp workspaces only
+
+[eval] 001-fix-failing-test
+[tool_call] read_file {"path":"src/math.js"}
+[tool_result] success=true
+[tool_call] edit_file {"path":"src/math.js","oldText":"<22 chars>","newText":"<22 chars>","reason":"Fix subtract function to actually subtract instead of add"}
+[edit_file] Auto-approved patch for src/math.js
+[hook] after_edit: npm test
+[hook_result] after_edit success=true
+[tool_result] success=true
+[session] saved .nanoclaude/sessions/2026-05-22T05-23-32-006Z-wp6s6p.json
+
+Task                   Result   Steps   Verification
+001-fix-failing-test   PASS     24      check.js
+002-add-cli-flag       PASS     15      check.js
+003-update-readme      PASS     10      check.js
+004-fix-type-error     PASS     23      check.js
+005-add-unit-test      PASS     20      check.js
+
+Success rate: 5/5
+```
+
+`--auto-approve-edits` only affects edit patch approval. It does not approve confirm-level bash commands, bypass denied commands, disable path safety, skip unique `oldText` validation, or disable verification hooks.
+
+## Trace Example
+
+A trace contains structured steps similar to:
+
+```json
+[
+  {
+    "type": "model_message",
+    "content": "{\"type\":\"tool_call\",\"tool\":\"read_file\",...}"
+  },
+  {
+    "type": "tool_call",
+    "tool": "edit_file",
+    "args": {
+      "path": "src/math.js",
+      "oldText": "<22 chars>",
+      "newText": "<22 chars>",
+      "reason": "Fix subtract function"
+    }
+  },
+  {
+    "type": "edit_applied",
+    "path": "src/math.js",
+    "applied": true,
+    "approvalMode": "manual",
+    "approved": true,
+    "outcome": "applied"
+  },
+  {
+    "type": "verification",
+    "command": "npm test",
+    "decision": "allow",
+    "exitCode": 0,
+    "timedOut": false,
+    "passed": true
+  },
+  {
+    "type": "final",
+    "status": "success",
+    "content": "Fixed the failing test..."
+  }
+]
+```
+
+Trace text is capped and redacted to reduce accidental leakage of API keys, bearer tokens, passwords, and `.env`-style values.
+
+## Demo Talking Points
+
+- The model does not get arbitrary filesystem access; it must use tools.
+- File writes are patch-style exact replacements, not broad overwrites.
+- The diff is visible before the write.
+- Manual approval is the default.
+- Eval auto-approval is explicit and scoped to copied temp workspaces.
+- Bash commands are policy-controlled.
+- Verification runs after successful real edits.
+- Traces provide evidence for what happened without storing huge raw outputs.

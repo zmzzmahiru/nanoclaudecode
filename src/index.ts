@@ -13,6 +13,7 @@ export interface CliOptions {
   version: boolean;
   hooksEnabled: boolean;
   rulesEnabled: boolean;
+  autoApproveEdits: boolean;
   maxIterations?: number;
 }
 
@@ -24,6 +25,7 @@ export function parseCliArgs(argv: string[]): CliOptions {
     version: false,
     hooksEnabled: true,
     rulesEnabled: true,
+    autoApproveEdits: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -46,6 +48,11 @@ export function parseCliArgs(argv: string[]): CliOptions {
 
     if (arg === "--no-rules") {
       options.rulesEnabled = false;
+      continue;
+    }
+
+    if (arg === "--auto-approve-edits") {
+      options.autoApproveEdits = true;
       continue;
     }
 
@@ -82,6 +89,7 @@ Options:
   --max-iterations <n>   Override the agent iteration limit
   --no-hooks             Disable automatic hooks such as after_edit build checks
   --no-rules             Do not load NANOCLAUDE.md, AGENTS.md, or CLAUDE.md
+  --auto-approve-edits   Apply edit_file patches without prompting; intended for eval/CI workspaces
 `;
 }
 
@@ -118,6 +126,7 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
     llm: provider,
     hooksEnabled: options.hooksEnabled,
     rulesEnabled: options.rulesEnabled,
+    autoApproveEdits: options.autoApproveEdits,
   };
 
   if (options.maxIterations !== undefined) {

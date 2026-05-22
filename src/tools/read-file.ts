@@ -15,6 +15,7 @@ export interface ToolContext {
   maxToolOutputChars?: number;
   commandTimeoutMs?: number;
   verifyAfterEdit?: string[];
+  autoApproveEdits?: boolean;
 }
 
 export interface ReadFileArgs {

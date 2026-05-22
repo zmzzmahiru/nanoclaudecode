@@ -16,6 +16,8 @@
 | v9 | Vitest suite for core non-LLM logic |
 | v10 | Packaged CLI with help, version, iteration, hook, and rules flags |
 | v11 | Documentation, demo material, examples, and GitHub polish |
+| Phase 3 | `nanoclaude.config.json`, configurable verification, permission policy wiring, and improved traces |
+| Phase 4 | Local five-task eval harness and explicit edit auto-approval for eval/CI workspaces |
 
 ## Future Ideas
 
@@ -27,9 +29,9 @@ Add reusable task recipes, such as "review code", "add tests", or "prepare relea
 
 Allow a saved session trace to be reloaded so an agent can continue from previous context with explicit user consent.
 
-### Config File
+### Config Evolution
 
-Add a project-level config file for defaults such as max iterations, enabled hooks, ignored directories, and preferred verification commands.
+Extend `nanoclaude.config.json` with more explicit ignore patterns, per-tool limits, and named profiles while keeping defaults easy to audit.
 
 ### Richer Patch Editing
 

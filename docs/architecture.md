@@ -1,38 +1,65 @@
 # NanoClaude Architecture
 
-NanoClaude is organized as a small set of TypeScript modules. The goal is to make each agent concept easy to find, reason about, and replace.
+NanoClaude is a small TypeScript coding-agent runtime. The implementation is intentionally direct: the goal is to make the control flow, safety checks, verification, and trace evidence easy to inspect.
+
+## Flow
+
+```text
+User task
+  -> agent loop
+  -> model call
+  -> tool call validation
+  -> permission/path safety
+  -> tool execution
+  -> edit verification
+  -> trace/redaction
+  -> final response
+```
 
 ## LLM Provider Layer
 
-The provider lives in `src/llm/openai-compatible.ts`. It wraps the OpenAI SDK against any OpenAI-compatible endpoint using:
+The provider lives in `src/llm/openai-compatible.ts`.
+
+It uses the OpenAI SDK against any OpenAI-compatible endpoint configured by:
 
 - `LLM_BASE_URL`
 - `LLM_API_KEY`
 - `LLM_MODEL`
 
-The rest of the agent depends on a small `LLMProvider` interface, not on provider-specific details.
+The agent loop only depends on a small `LLMProvider` interface:
+
+```ts
+interface LLMProvider {
+  complete(messages: LLMMessage[]): Promise<string>;
+}
+```
+
+That keeps provider concerns separate from tool execution and agent state.
 
 ## Agent Loop
 
 The main loop lives in `src/agent/loop.ts`.
 
-Its job is to:
+Responsibilities:
 
+- load `nanoclaude.config.json`
+- optionally load project rules
 - build the system prompt
-- load project rules
-- send conversation messages to the model
-- parse JSON responses
-- execute tools
-- update todos
-- run hooks
-- save a session trace
-- stop on final answer or iteration limit
+- call the model
+- parse the JSON response
+- execute requested tools
+- append tool results back into the conversation
+- track todo updates
+- stop on final answer or max step limit
+- write the session trace
 
-The default iteration limit is intentionally finite to prevent runaway loops.
+The loop has a finite step limit controlled by `agent.maxSteps` or `--max-iterations`.
 
 ## JSON Protocol
 
-NanoClaude does not use official function calling yet. The model must reply with JSON:
+NanoClaude does not use official OpenAI function calling. The model responds with plain JSON.
+
+Final answer:
 
 ```json
 {
@@ -40,6 +67,8 @@ NanoClaude does not use official function calling yet. The model must reply with
   "content": "..."
 }
 ```
+
+Tool call:
 
 ```json
 {
@@ -51,7 +80,7 @@ NanoClaude does not use official function calling yet. The model must reply with
 }
 ```
 
-Planning uses:
+Todo update:
 
 ```json
 {
@@ -61,13 +90,13 @@ Planning uses:
 }
 ```
 
-This keeps the protocol inspectable and easy to test.
+This protocol is simple to inspect and easy to test, but it is less robust than a mature structured function-calling API.
 
 ## Tool Registry
 
 The registry lives in `src/tools/index.ts`.
 
-It maps tool names to implementations:
+Registered tools:
 
 - `read_file`
 - `list_files`
@@ -76,7 +105,7 @@ It maps tool names to implementations:
 - `bash`
 - `edit_file`
 
-All tools return:
+Tools return:
 
 ```json
 {
@@ -86,80 +115,169 @@ All tools return:
 }
 ```
 
-## Permission System
-
-Permission prompts live in `src/permissions`.
-
-`bash` uses a deterministic allow/confirm/deny policy. Confirm-class commands ask before running, denied commands are rejected, and allowed verification commands can run directly. `edit_file` performs one exact `oldText` to `newText` replacement, asks before writing files after showing a unified diff, and rejects missing or duplicate matches. Non-interactive confirmation requests default to rejection, which is safer for tests and automation.
+Tool implementations receive a shared context containing the project root, permission policy, output limits, verification commands, timeout, and edit auto-approval flag.
 
 ## Path Safety
 
 Path safety lives in `src/tools/path-safety.ts`.
 
-Tools resolve paths against the project root and reject attempts to escape it. Search tools ignore `node_modules` and `dist` by default. Symlink and real-path checks reduce accidental access outside the intended workspace.
+Tools resolve paths relative to the project root and reject paths that escape it. This includes direct traversal attempts such as `../outside.txt`. Absolute paths are rejected for `edit_file`.
+
+Search tools ignore `node_modules` and `dist` by default to reduce noise and avoid huge output.
+
+## Edit Model
+
+The `edit_file` tool lives in `src/tools/edit-file.ts`.
+
+Input shape:
+
+```json
+{
+  "path": "relative/path.ts",
+  "oldText": "exact text to replace",
+  "newText": "replacement text",
+  "reason": "why this edit is needed"
+}
+```
+
+Safety checks:
+
+- path must resolve inside the project root
+- absolute paths are rejected
+- `oldText` must be non-empty
+- `oldText` must exist
+- `oldText` must appear exactly once
+- only that exact occurrence is replaced
+- a unified diff preview is generated before writing
+- default writes require approval
+
+For eval and CI workflows, `--auto-approve-edits` can auto-approve `edit_file` patches. That option only affects edit approval. It does not bypass path checks, unique-match validation, bash policy, or verification hooks.
+
+## Permission System
+
+The bash permission policy is defined by:
+
+```ts
+interface PermissionPolicy {
+  allow: string[];
+  confirm: string[];
+  deny: string[];
+}
+```
+
+Decision rules:
+
+- deny rules take priority
+- allow rules run without extra confirmation
+- confirm rules ask for approval
+- unknown commands default to confirm
+- denied commands do not run
+
+The matching logic is intentionally conservative and simple. It is not a full shell parser.
+
+## Configuration
+
+The config loader lives in `src/config.ts` and reads `nanoclaude.config.json` from the project root.
+
+Supported fields:
+
+- `verify.afterEdit`
+- `verify.timeoutMs`
+- `permissions.allowCommands`
+- `permissions.confirmCommands`
+- `permissions.denyCommands`
+- `agent.maxSteps`
+- `agent.maxToolOutputChars`
+
+Missing config files use defaults. Partial configs are merged with defaults. Invalid field types produce clear errors.
+
+## Verification Hooks
+
+After a successful real edit, `edit_file` runs configured `verify.afterEdit` commands.
+
+Verification commands:
+
+- run from the project root
+- use `verify.timeoutMs`
+- go through the bash permission policy
+- return structured stdout, stderr, exit code, timeout state, and error
+- stop on the first failure
+
+The verification result is included in the `edit_file` tool output so the model can attempt a follow-up repair.
 
 ## Plan Mode
 
-Plan Mode is implemented in memory inside the agent loop.
+Plan Mode is in-memory and lives inside the agent loop.
 
-The model can create a todo list and update items as it works. The CLI prints updates:
+The model can produce todo lists and todo updates. The CLI prints lines such as:
 
 ```text
 [todo] in_progress: Inspect project structure
 [todo] done: Run npm run build
 ```
 
-Todos are not stored in a database; they exist for one run and are also recorded in the session trace.
+Todo events are also recorded in the session trace.
 
 ## Project Rules Loading
 
-Project rules are loaded by `src/agent/project-rules.ts`.
-
-NanoClaude checks the project root in this priority order:
+Project rules are loaded from the project root in priority order:
 
 1. `NANOCLAUDE.md`
 2. `AGENTS.md`
 3. `CLAUDE.md`
 
-Only the first match is loaded, and content is capped before being injected into the system prompt.
+Only the first matching file is loaded, and content is capped before being injected into the system prompt.
 
 ## Session Traces
 
-Session traces are implemented in `src/agent/session-trace.ts`.
+Trace logging lives in `src/agent/session-trace.ts`.
 
-Each run writes a JSON file under `.nanoclaude/sessions` containing:
+Each run writes JSON under `.nanoclaude/sessions/`. The trace includes:
 
 - session metadata
 - user task
-- loaded rules file
+- loaded rules file, if any
 - todo events
-- tool calls
-- capped tool results
+- legacy tool call/result arrays
+- structured `steps`
 - final answer or error status
 
-Trace logging redacts common secret-looking content and avoids storing raw `.env` output.
+Current `steps` event types:
 
-## Hooks
+- `model_message`
+- `tool_call`
+- `tool_result`
+- `permission_decision`
+- `edit_applied`
+- `verification`
+- `final`
 
-Hooks live in `src/agent/hooks.ts`.
+Trace output is capped and redacted. Redaction covers obvious `.env`-style secrets, bearer tokens, variables containing `KEY`, `TOKEN`, `SECRET`, or `PASSWORD`, and long secret-looking values where practical.
 
-The current hook is hardcoded:
+## Local Eval Harness
 
-- after a successful `edit_file`, propose `npm run build`
+The eval harness lives in `eval/run-eval.ts`.
 
-The hook reuses the `bash` tool, so it does not bypass approval. Hook-triggered tool calls are marked in the session trace with `source: "hook"`.
+It discovers five deterministic tasks under `eval/tasks`, copies each fixture repo into `eval/results/<run-id>/workspaces`, runs NanoClaude with edit auto-approval enabled only for those copied workspaces, runs each `check.js`, and prints a PASS/FAIL table.
+
+The latest local run in this repository was 5/5. This is a small local regression and demo harness, not SWE-bench and not a broad benchmark.
 
 ## Testing Strategy
 
 Tests live in `tests/core.test.ts` and use Vitest.
 
-The suite avoids real LLM calls and focuses on deterministic logic:
+The suite avoids real LLM calls. It covers:
 
 - path safety
-- read/list/search tools
-- edit validation
-- trace redaction
-- hook behavior
-- CLI argument parsing
+- filesystem tools
+- search tools
+- patch-style edit validation
+- approval behavior
+- bash permission decisions
+- config loading
+- verification hooks
+- session trace redaction and event extraction
+- eval harness utilities
+- CLI option parsing
 
-Filesystem tests use temporary directories so they do not depend on the repository state.
+Filesystem tests use temporary directories so they do not depend on repository state.

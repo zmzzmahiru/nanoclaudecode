@@ -1,28 +1,40 @@
 # NanoClaude
 
-A lightweight TypeScript AI coding-agent framework with JSON tool calling, approval-gated edits, session traces, and a packaged CLI.
+NanoClaude is a lightweight Claude-Code-style coding agent CLI built in TypeScript, focused on safe local tool execution, patch-based editing, deterministic verification, auditable traces, and reproducible local evals.
 
-NanoClaude is a small, readable implementation of the core ideas behind coding agents: an LLM loop, tools, permissions, project rules, planning, verification hooks, and test coverage. It is intentionally educational rather than maximal.
+It is not a clone of any commercial coding agent. It is a compact infrastructure project that exposes the moving parts behind a coding-agent runtime: model loop, JSON tool protocol, path safety, permission policy, diff-based edits, verification, traces, and local evaluation.
 
-## Why NanoClaude Exists
+## Why NanoClaude?
 
-Modern coding agents can feel mysterious because tool calling, permission checks, edit previews, traces, and planning are often hidden inside large systems. NanoClaude keeps those pieces visible in a compact TypeScript codebase so it can be studied, extended, and demonstrated in interviews or portfolio reviews.
+Modern coding agents need more than chat completion. A useful local coding agent needs to inspect files, make narrowly scoped edits, run verification, ask before risky actions, and leave behind enough evidence to debug what happened.
+
+NanoClaude exists to make those concerns explicit and readable:
+
+- safe file editing through exact local replacements
+- permission-gated shell execution
+- project-level configuration
+- verification after changes
+- structured session traces
+- redaction of obvious secrets
+- small local eval tasks for repeatable demos
 
 ## Features
 
-| Area | What NanoClaude Provides |
+| Area | Implemented capability |
 | --- | --- |
-| LLM provider | OpenAI-compatible chat provider via `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL` |
-| Agent protocol | Simple JSON responses for final answers, tool calls, and todo updates |
-| Read-only tools | `read_file`, `list_files`, `glob`, `grep` |
-| Command execution | Policy-controlled `bash` tool with allow/confirm/deny decisions, timeout, and capped output |
-| Editing | Safe `edit_file` with unified diff preview and `y/N` approval |
-| Plan Mode | In-memory todo list for complex tasks |
-| Project rules | Loads `NANOCLAUDE.md`, `AGENTS.md`, or `CLAUDE.md` from the project root |
-| Session traces | Redacted JSON traces under `.nanoclaude/sessions` |
-| Hooks | `after_edit` suggests `npm run build` through the same approval-gated bash tool |
-| CLI | `nanoclaude` binary with `--help`, `--version`, `--max-iterations`, `--no-hooks`, `--no-rules` |
-| Tests | Vitest suite for non-LLM core logic |
+| CLI | TypeScript CLI with `npm run dev -- "task"` and packaged `nanoclaude` binary |
+| Model API | OpenAI-compatible provider configured by `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL` |
+| Agent loop | JSON protocol for final answers, todo updates, and tool calls |
+| Read tools | `read_file`, `list_files`, `glob`, and `grep` |
+| Editing | `edit_file` uses `path`, `oldText`, `newText`, and `reason` |
+| Edit safety | path sandboxing, exact unique `oldText` validation, unified diff preview, approval-gated writes |
+| Eval/CI mode | explicit `--auto-approve-edits` for copied eval or CI workspaces |
+| Bash tool | allow/confirm/deny `PermissionPolicy`, deny priority, unknown commands default to confirm |
+| Config | `nanoclaude.config.json` for verification, permissions, and agent limits |
+| Verification | successful real edits trigger configured `verify.afterEdit` commands |
+| Traces | structured session trace events with capped and redacted output |
+| Eval harness | five deterministic local coding tasks under `eval/tasks` |
+| Tests | Vitest suite for non-LLM core logic; currently 57 tests |
 
 ## Quick Start
 
@@ -32,7 +44,7 @@ Install dependencies:
 npm install
 ```
 
-Create a local environment file:
+Configure an OpenAI-compatible model. You can copy `.env.example` first:
 
 ```bash
 cp .env.example .env
@@ -44,36 +56,45 @@ On Windows:
 copy .env.example .env
 ```
 
-Configure an OpenAI-compatible provider in `.env`:
+Set these variables:
 
 ```bash
 LLM_BASE_URL=https://api.openai.com/v1
 LLM_API_KEY=your_api_key_here
-LLM_MODEL=gpt-4.1-mini
+LLM_MODEL=your_model_here
 ```
 
-Run in development:
-
-```bash
-npm run dev -- "Inspect this project and summarize its architecture"
-```
-
-Build and run the packaged CLI:
+Build and test:
 
 ```bash
 npm run build
-node dist/index.js "Explain the available tools"
+npm test
 ```
+
+Run the CLI in development:
+
+```bash
+npm run dev -- "Inspect this project and summarize the agent architecture"
+```
+
+Run the local eval harness:
+
+```bash
+npm run eval
+```
+
+Latest local eval result from this repository:
+
+```text
+Success rate: 5/5
+```
+
+This is a small local eval harness, not SWE-bench and not a broad benchmark.
 
 ## CLI Usage
 
 ```bash
 nanoclaude [options] "your task here"
-```
-
-Local development equivalent:
-
-```bash
 npm run dev -- [options] "your task here"
 ```
 
@@ -83,135 +104,230 @@ Options:
 --help                 Show help
 --version              Show package version
 --max-iterations <n>   Override the agent iteration limit
---no-hooks             Disable automatic hooks such as after_edit build checks
+--no-hooks             Disable automatic after-edit verification hooks
 --no-rules             Skip NANOCLAUDE.md / AGENTS.md / CLAUDE.md loading
+--auto-approve-edits   Apply edit_file patches without prompting; intended for eval/CI workspaces
 ```
 
 Examples:
 
 ```bash
-node dist/index.js --help
-node dist/index.js --version
-node dist/index.js --no-rules "Explain this repository"
-node dist/index.js --no-hooks "Edit README.md but do not auto-run build"
-npm run dev -- --max-iterations 30 "Inspect the project and summarize it"
+npm run dev -- "Explain the tool registry"
+npm run dev -- --max-iterations 30 "Fix the failing test"
+npm run dev -- --no-rules "Summarize this repo without project rules"
+npm run dev -- --auto-approve-edits "Run a controlled eval task in a temp workspace"
 ```
 
-## Example Workflow
+## Configuration
 
-```bash
-npm run dev -- "Make a tiny README improvement and verify the build"
+NanoClaude looks for `nanoclaude.config.json` in the project root. Missing fields are merged with defaults.
+
+```json
+{
+  "verify": {
+    "afterEdit": ["npm test", "npm run build"],
+    "timeoutMs": 30000
+  },
+  "permissions": {
+    "allowCommands": [
+      "pwd",
+      "ls",
+      "cat",
+      "grep",
+      "find",
+      "npm test",
+      "npm run build",
+      "npx tsc",
+      "pytest"
+    ],
+    "confirmCommands": [
+      "npm install",
+      "pnpm install",
+      "yarn install",
+      "git checkout",
+      "git commit",
+      "git reset",
+      "rm",
+      "mv",
+      "cp"
+    ],
+    "denyCommands": [
+      "sudo",
+      "ssh",
+      "scp",
+      "curl",
+      "wget",
+      "chmod 777",
+      "chown"
+    ]
+  },
+  "agent": {
+    "maxSteps": 20,
+    "maxToolOutputChars": 12000
+  }
+}
 ```
 
-Typical CLI output:
+## Tool Model
 
-```text
-[rules] loaded NANOCLAUDE.md
-[todo] in_progress: Inspect README
-[tool_call] read_file {"path":"README.md"}
-[tool_result] success=true
-[tool_call] edit_file {"path":"README.md","oldText":"<42 chars>","newText":"<58 chars>","reason":"Improve wording"}
+NanoClaude tools return a structured result:
 
-[edit_file] Proposed changes for README.md:
---- README.md
-+++ README.md
-@@ -1,3 +1,3 @@
--old text
-+new text
-
-[edit_file] Apply this change? y
-[tool_result] success=true
-[hook] after_edit: npm run build
-[bash] Run command in ...: npm run build y/N y
-[hook_result] after_edit success=true
-[session] saved .nanoclaude/sessions/<id>.json
+```json
+{
+  "success": true,
+  "output": "...",
+  "error": null
+}
 ```
 
-See [docs/demo.md](docs/demo.md) for a fuller transcript.
+Main tools:
+
+- `read_file`: reads a UTF-8 text file inside the project root.
+- `list_files`: lists direct children of a project directory.
+- `glob`: returns matching file paths under the project root, ignoring `node_modules` and `dist`.
+- `grep`: searches text files and returns paths, line numbers, and snippets.
+- `bash`: runs development commands from the project root through the permission policy.
+- `edit_file`: applies one exact `oldText` to `newText` replacement after validation and approval.
 
 ## Safety Model
 
-NanoClaude is designed to make side effects visible and reversible:
+NanoClaude is designed to make local side effects explicit:
 
-- Paths are resolved with real-path checks and must stay inside the project root.
-- `read_file`, `list_files`, `glob`, and `grep` are read-only.
-- `bash` uses a deterministic allow/confirm/deny policy. Confirm-class commands ask for approval, denied commands are rejected, and allowed verification commands can run without an extra prompt.
-- `edit_file` shows a unified diff and asks for approval before writing.
-- Tool outputs are capped before being sent back to the model or saved in traces.
-- Session traces redact common secret-looking values and avoid storing `.env` contents.
-- `after_edit` verification reuses the `bash` permission flow instead of bypassing approval.
+- `edit_file` uses exact `oldText` / `newText` local replacement.
+- Absolute paths are rejected.
+- Path traversal outside the project root is rejected.
+- `oldText` must appear exactly once.
+- A unified diff preview is shown before writes.
+- Default write behavior requires approval.
+- Non-interactive runs without approval reject edits rather than silently applying them.
+- `--auto-approve-edits` is explicit and intended for eval/CI temp workspaces.
+- `--auto-approve-edits` does not bypass path safety, unique-match validation, bash policy, or verification hooks.
+- `bash` uses allow/confirm/deny command policy.
+- Denied commands do not run.
+- Unknown commands default to confirm.
+- Tool output and traces redact obvious secret-like values where supported.
 
-## Architecture Overview
+This is not production-grade sandboxing. It is a conservative local safety model for a small coding-agent framework.
 
-```mermaid
-flowchart TD
-  CLI["CLI (src/index.ts)"] --> Agent["Agent Loop"]
-  Agent --> Provider["OpenAI-Compatible Provider"]
-  Provider --> Model["LLM"]
-  Model --> Agent
-  Agent --> Registry["Tool Registry"]
-  Registry --> ReadTools["read_file / list_files / glob / grep"]
-  Registry --> Bash["bash (approval-gated)"]
-  Registry --> Edit["edit_file (diff + approval)"]
-  Agent --> Rules["Project Rules"]
-  Agent --> Trace["Session Trace"]
-  Edit --> Hooks["after_edit Hook"]
-  Hooks --> Bash
+## Verification Hooks
+
+Successful real `edit_file` changes trigger configured `verify.afterEdit` commands.
+
+Verification behavior:
+
+- hooks run from the project root
+- hooks use `verify.timeoutMs`
+- commands go through the same bash allow/confirm/deny policy
+- results include command, decision, exit code, stdout, stderr, timeout state, and error
+- the first failing verification command stops later commands
+- failed verification is returned to the agent so it can attempt a follow-up fix
+
+No-op edits, rejected edits, missing `oldText`, and duplicate `oldText` do not trigger verification.
+
+## Session Trace
+
+Each run writes a JSON trace under `.nanoclaude/sessions/`. Trace output is capped and redacted.
+
+Example event flow:
+
+```text
+model_message
+tool_call
+tool_result
+permission_decision
+edit_applied
+verification
+final
 ```
 
-More detail: [docs/architecture.md](docs/architecture.md).
+Trace events capture model messages, tool calls, tool results, bash permission decisions, edit outcomes, verification results, and final status. Edit trace events include whether a patch was manually approved, auto-approved, rejected, or not required.
+
+## Local Eval Harness
+
+The eval harness lives in `eval/`.
+
+```text
+eval/
+  run-eval.ts
+  tasks/
+    001-fix-failing-test/
+    002-add-cli-flag/
+    003-update-readme/
+    004-fix-type-error/
+    005-add-unit-test/
+```
+
+`npm run eval`:
+
+- discovers tasks under `eval/tasks`
+- copies each fixture repo into `eval/results/<run-id>/workspaces`
+- runs NanoClaude on `task.md`
+- auto-approves `edit_file` patches only in those copied workspaces
+- keeps bash allow/confirm/deny policy active
+- runs each task's `check.js`
+- reports PASS/FAIL, step count, and checker name
+- saves summaries and traces under `eval/results/`
+
+Latest local run:
+
+```text
+Task                   Result   Steps   Verification
+001-fix-failing-test   PASS     24      check.js
+002-add-cli-flag       PASS     15      check.js
+003-update-readme      PASS     10      check.js
+004-fix-type-error     PASS     23      check.js
+005-add-unit-test      PASS     20      check.js
+
+Success rate: 5/5
+```
+
+This eval is intentionally small and deterministic. It is useful for regression checks and demos, not for broad performance claims.
+
+## Architecture
+
+```text
+User task
+  -> agent loop
+  -> model call
+  -> tool call validation
+  -> permission/path safety
+  -> tool execution
+  -> edit verification
+  -> trace/redaction
+  -> final response
+```
+
+See [docs/architecture.md](docs/architecture.md) for more detail.
+
+## Demo
+
+See [docs/demo.md](docs/demo.md) for a terminal-style walkthrough showing a failing test fix, patch preview, approval behavior, verification, and trace output.
 
 ## Testing
 
-Baseline verification for contributors:
-
-```bash
-npm install
-npm run build
-npm test
-node dist/index.js --help
-```
-
-Run the build:
-
 ```bash
 npm run build
-```
-
-Run tests:
-
-```bash
 npm test
 ```
 
-Watch mode:
+The test suite does not call a real LLM. It focuses on deterministic behavior: path safety, tool results, edit validation, bash permissions, config loading, trace redaction, eval harness utilities, and CLI parsing.
 
-```bash
-npm run test:watch
-```
+## Limitations
 
-The test suite avoids real LLM calls and focuses on path safety, filesystem tools, edit validation, trace redaction, hook behavior, and CLI option parsing.
+- The local eval harness is small.
+- Success depends on the configured model.
+- Shell command matching is conservative and simple; it is not a full shell parser.
+- `edit_file` is exact string replacement, not a full multi-hunk patch parser.
+- `--auto-approve-edits` is all-or-nothing for edit patches during a run.
+- NanoClaude is not production-ready security sandboxing.
 
-## Documentation
+## Related Docs
 
 - [Architecture](docs/architecture.md)
 - [Demo transcript](docs/demo.md)
 - [Roadmap](docs/roadmap.md)
 - [Example prompts](examples/README.md)
 
-## Roadmap
-
-Near-term ideas:
-
-- Skills and reusable workflows
-- Resumable sessions
-- Config file for hooks and defaults
-- Richer patch editing
-- Sandbox or container execution mode
-- Multi-provider benchmark harness
-
-See [docs/roadmap.md](docs/roadmap.md) for the full milestone history and future plan.
-
 ## Resume-Friendly Summary
 
-NanoClaude is a TypeScript implementation of a safe coding-agent runtime. It demonstrates LLM orchestration, JSON tool protocols, permission-gated command execution, diff-based editing, project rule injection, trace logging, hooks, CLI packaging, and automated tests in a compact codebase suitable for demos and technical interviews.
+NanoClaude is a TypeScript coding-agent infrastructure project demonstrating LLM orchestration, JSON tool calling, safe patch-style editing, permission-controlled bash execution, configurable verification hooks, auditable redacted traces, CLI packaging, and a reproducible local eval harness.

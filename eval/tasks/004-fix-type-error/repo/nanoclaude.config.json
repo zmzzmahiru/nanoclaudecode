@@ -1,0 +1,15 @@
+{
+  "verify": {
+    "afterEdit": ["npm run build"],
+    "timeoutMs": 10000
+  },
+  "permissions": {
+    "allowCommands": ["npm run build"],
+    "confirmCommands": [],
+    "denyCommands": ["sudo", "curl", "wget"]
+  },
+  "agent": {
+    "maxSteps": 20,
+    "maxToolOutputChars": 6000
+  }
+}

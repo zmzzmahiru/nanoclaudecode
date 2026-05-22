@@ -23,8 +23,14 @@ interface EditFileOutput {
   applied: boolean;
   reason: string;
   diff: string;
+  approval: EditApproval;
   verification: EditVerification;
   error: string | null;
+}
+
+interface EditApproval {
+  mode: "manual" | "auto" | "not_required";
+  approved: boolean;
 }
 
 interface EditVerification {
@@ -98,6 +104,7 @@ function failedResult(input: {
   reason: string;
   error: string;
   diff?: string;
+  approval?: EditApproval;
 }): ToolResult {
   return {
     success: false,
@@ -106,6 +113,10 @@ function failedResult(input: {
       applied: false,
       reason: input.reason,
       diff: input.diff ?? "",
+      approval: input.approval ?? {
+        mode: "not_required",
+        approved: false,
+      },
       verification: noVerification(),
       error: input.error,
     }),
@@ -255,6 +266,25 @@ function parseVerificationResult(
   }
 }
 
+async function approveEdit(
+  relativePath: string,
+  diff: string,
+  context: ToolContext,
+): Promise<EditApproval> {
+  if (context.autoApproveEdits) {
+    console.log(`[edit_file] Auto-approved patch for ${relativePath}`);
+    return {
+      mode: "auto",
+      approved: true,
+    };
+  }
+
+  return {
+    mode: "manual",
+    approved: await confirmEdit(relativePath, diff),
+  };
+}
+
 export async function editFileTool(
   args: EditFileArgs,
   context: ToolContext,
@@ -293,6 +323,10 @@ export async function editFileTool(
           applied: false,
           reason,
           diff: "",
+          approval: {
+            mode: "not_required",
+            approved: false,
+          },
           verification: noVerification("No file change was needed."),
           error: null,
         }),
@@ -301,13 +335,14 @@ export async function editFileTool(
     }
 
     const diff = createUnifiedDiff(relativePath, original, updated);
-    const approved = await confirmEdit(relativePath, diff);
+    const approval = await approveEdit(relativePath, diff, context);
 
-    if (!approved) {
+    if (!approval.approved) {
       return failedResult({
         path: relativePath,
         reason,
         diff,
+        approval,
         error: "Edit rejected by user.",
       });
     }
@@ -327,6 +362,7 @@ export async function editFileTool(
         applied: true,
         reason,
         diff,
+        approval,
         verification,
         error: verificationError,
       }),

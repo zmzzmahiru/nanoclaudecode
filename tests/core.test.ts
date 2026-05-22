@@ -8,6 +8,7 @@ vi.mock("../src/permissions/confirm-edit.js", () => ({
   confirmEdit: vi.fn(async () => true),
 }));
 
+import { confirmEdit } from "../src/permissions/confirm-edit.js";
 import { runAfterEditHook } from "../src/agent/hooks.js";
 import { runAgent } from "../src/agent/loop.js";
 import {
@@ -28,6 +29,16 @@ import { listFilesTool } from "../src/tools/list-files.js";
 import { resolveInsideProject } from "../src/tools/path-safety.js";
 import { readFileTool } from "../src/tools/read-file.js";
 import { parseCliArgs } from "../src/index.js";
+import {
+  createTaskWorkspace,
+  discoverEvalTasks,
+  evalAgentOptions,
+  extractTraceStepCount,
+  formatResultTable,
+  parsePassFail,
+  runChecker,
+  type EvalResult,
+} from "../eval/run-eval.js";
 
 const tempRoots: string[] = [];
 
@@ -173,6 +184,64 @@ describe("filesystem tools", () => {
     );
   });
 
+  it("edit_file still rejects by default when approval is not granted", async () => {
+    const projectRoot = await createTempProject();
+    vi.mocked(confirmEdit).mockResolvedValueOnce(false);
+    await writeProjectFile(projectRoot, "README.md", "old\n");
+
+    const result = await editFileTool(
+      {
+        path: "README.md",
+        oldText: "old",
+        newText: "new",
+        reason: "default approval should still be required",
+      },
+      { projectRoot },
+    );
+    const output = parseToolOutput(result.output);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Edit rejected by user.");
+    expect(output.approval).toMatchObject({
+      mode: "manual",
+      approved: false,
+    });
+    await expect(readFile(path.join(projectRoot, "README.md"), "utf8")).resolves.toBe(
+      "old\n",
+    );
+  });
+
+  it("auto-approve edits applies a valid patch", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(projectRoot, "README.md", "old\n");
+
+    const result = await editFileTool(
+      {
+        path: "README.md",
+        oldText: "old",
+        newText: "new",
+        reason: "eval auto approval",
+      },
+      {
+        projectRoot,
+        autoApproveEdits: true,
+      },
+    );
+    const output = parseToolOutput(result.output);
+
+    expect(result.success).toBe(true);
+    expect(output).toMatchObject({
+      applied: true,
+      approval: {
+        mode: "auto",
+        approved: true,
+      },
+    });
+    await expect(readFile(path.join(projectRoot, "README.md"), "utf8")).resolves.toBe(
+      "new\n",
+    );
+  });
+
   it("edit_file replace mode rejects missing oldText", async () => {
     const projectRoot = await createTempProject();
     await writeProjectFile(projectRoot, "README.md", "hello world\n");
@@ -259,6 +328,64 @@ describe("filesystem tools", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("outside the project root");
+  });
+
+  it("auto-approve edits does not bypass path traversal protection", async () => {
+    const projectRoot = await createTempProject();
+
+    const result = await editFileTool(
+      {
+        path: "../outside.txt",
+        oldText: "old",
+        newText: "new",
+        reason: "path traversal should remain blocked",
+      },
+      {
+        projectRoot,
+        autoApproveEdits: true,
+      },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("outside the project root");
+  });
+
+  it("auto-approve edits does not bypass missing or duplicate oldText validation", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(projectRoot, "README.md", "same\nsame\n");
+
+    const missing = await editFileTool(
+      {
+        path: "README.md",
+        oldText: "missing",
+        newText: "new",
+        reason: "missing oldText remains invalid",
+      },
+      {
+        projectRoot,
+        autoApproveEdits: true,
+      },
+    );
+    const duplicate = await editFileTool(
+      {
+        path: "README.md",
+        oldText: "same",
+        newText: "new",
+        reason: "duplicate oldText remains invalid",
+      },
+      {
+        projectRoot,
+        autoApproveEdits: true,
+      },
+    );
+
+    expect(missing.success).toBe(false);
+    expect(missing.error).toBe("oldText was not found in the file.");
+    expect(duplicate.success).toBe(false);
+    expect(duplicate.error).toContain("oldText appears multiple times");
+    await expect(readFile(path.join(projectRoot, "README.md"), "utf8")).resolves.toBe(
+      "same\nsame\n",
+    );
   });
 
   it("edit_file preserves unrelated file content", async () => {
@@ -601,6 +728,7 @@ describe("session trace", () => {
         applied: true,
         reason: "update docs",
         diff: "--- README.md\n+++ README.md",
+        approval: { mode: "auto", approved: true },
         verification: { ran: false, results: [], passed: true },
         error: null,
       }),
@@ -613,6 +741,8 @@ describe("session trace", () => {
           type: "edit_applied",
           path: "README.md",
           applied: true,
+          approvalMode: "auto",
+          approved: true,
           outcome: "applied",
           reason: "update docs",
           error: null,
@@ -631,6 +761,7 @@ describe("session trace", () => {
         applied: true,
         reason: "update docs",
         diff: "",
+        approval: { mode: "auto", approved: true },
         verification: {
           ran: true,
           passed: true,
@@ -676,6 +807,7 @@ describe("session trace", () => {
         applied: true,
         reason: "update docs",
         diff: "",
+        approval: { mode: "auto", approved: true },
         verification: {
           ran: true,
           passed: false,
@@ -914,6 +1046,25 @@ describe("bash permission policy", () => {
       error: "Command rejected by user.",
     });
   });
+
+  it("auto-approve edits does not auto-approve confirm-level bash commands", async () => {
+    const projectRoot = await createTempProject();
+    const result = await bashTool(
+      { command: "python script.py", cwd: "." },
+      {
+        projectRoot,
+        autoApproveEdits: true,
+      },
+    );
+    const output = parseToolOutput(result.output);
+
+    expect(result.success).toBe(false);
+    expect(output).toMatchObject({
+      command: "python script.py",
+      decision: "confirm",
+      error: "Command rejected by user.",
+    });
+  });
 });
 
 describe("config loader", () => {
@@ -1062,6 +1213,7 @@ describe("CLI option parsing", () => {
         "12",
         "--no-hooks",
         "--no-rules",
+        "--auto-approve-edits",
         "update",
         "docs",
       ]),
@@ -1071,6 +1223,7 @@ describe("CLI option parsing", () => {
       version: false,
       hooksEnabled: false,
       rulesEnabled: false,
+      autoApproveEdits: true,
       maxIterations: 12,
     });
   });
@@ -1080,6 +1233,7 @@ describe("CLI option parsing", () => {
       task: "explain this project",
       hooksEnabled: true,
       rulesEnabled: true,
+      autoApproveEdits: false,
     });
   });
 
@@ -1087,5 +1241,105 @@ describe("CLI option parsing", () => {
     expect(() => parseCliArgs(["--max-iterations", "0", "task"])).toThrow(
       "positive integer",
     );
+  });
+});
+
+describe("eval harness", () => {
+  it("discovers eval tasks", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(projectRoot, "tasks/001-demo/task.md", "Do a thing\n");
+    await writeProjectFile(projectRoot, "tasks/001-demo/check.js", "process.exit(0);\n");
+    await writeProjectFile(projectRoot, "tasks/001-demo/repo/README.md", "# Demo\n");
+
+    const tasks = await discoverEvalTasks(path.join(projectRoot, "tasks"));
+
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject({
+      id: "001-demo",
+      checkerName: "check.js",
+    });
+  });
+
+  it("copies a task repo into a workspace", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(projectRoot, "tasks/001-demo/task.md", "Do a thing\n");
+    await writeProjectFile(projectRoot, "tasks/001-demo/check.js", "process.exit(0);\n");
+    await writeProjectFile(projectRoot, "tasks/001-demo/repo/src/app.js", "ok\n");
+    const [task] = await discoverEvalTasks(path.join(projectRoot, "tasks"));
+
+    const workspace = await createTaskWorkspace(
+      task!,
+      path.join(projectRoot, "results", "run"),
+    );
+
+    await expect(readFile(path.join(workspace, "src/app.js"), "utf8")).resolves.toBe(
+      "ok\n",
+    );
+  });
+
+  it("runs check.js and parses PASS/FAIL", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(
+      projectRoot,
+      "check.js",
+      "console.log('checker passed'); process.exit(0);\n",
+    );
+
+    const result = await runChecker(path.join(projectRoot, "check.js"), projectRoot);
+
+    expect(result.passed).toBe(true);
+    expect(result.stdout).toContain("checker passed");
+    expect(parsePassFail(result)).toBe("PASS");
+  });
+
+  it("formats a final result table", () => {
+    const results: EvalResult[] = [
+      {
+        taskId: "001-fix-failing-test",
+        result: "PASS",
+        steps: 8,
+        verification: "check.js",
+        summaryPath: "summary.json",
+        tracePath: "trace.json",
+        error: null,
+      },
+      {
+        taskId: "002-add-cli-flag",
+        result: "FAIL",
+        steps: null,
+        verification: "check.js",
+        summaryPath: "summary.json",
+        tracePath: null,
+        error: "failed",
+      },
+    ];
+
+    const table = formatResultTable(results);
+
+    expect(table).toContain("Task");
+    expect(table).toContain("001-fix-failing-test");
+    expect(table).toContain("PASS");
+    expect(table).toContain("Success rate: 1/2");
+  });
+
+  it("extracts trace step counts", async () => {
+    const projectRoot = await createTempProject();
+    await writeProjectFile(
+      projectRoot,
+      "trace.json",
+      JSON.stringify({
+        steps: [{ type: "tool_call" }, { type: "tool_result" }],
+      }),
+    );
+
+    await expect(
+      extractTraceStepCount(path.join(projectRoot, "trace.json")),
+    ).resolves.toBe(2);
+  });
+
+  it("uses auto-approved edits for eval agent runs", () => {
+    expect(evalAgentOptions()).toEqual({
+      autoApproveEdits: true,
+    });
   });
 });

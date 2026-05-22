@@ -306,6 +306,7 @@ function recordDerivedToolSteps(
   }
 
   const applied = editResult.applied === true;
+  const approval = getRecord(editResult.approval);
   const error =
     typeof editResult.error === "string" ? capAndRedact(editResult.error) : null;
   const outcome = applied
@@ -321,6 +322,8 @@ function recordDerivedToolSteps(
     type: "edit_applied",
     path: typeof editResult.path === "string" ? editResult.path : "",
     applied,
+    approvalMode: readString(approval?.mode),
+    approved: approval?.approved === true,
     outcome,
     reason:
       typeof editResult.reason === "string"

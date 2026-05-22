@@ -19,6 +19,7 @@ export interface AgentLoopInput {
   projectRoot?: string;
   hooksEnabled?: boolean;
   rulesEnabled?: boolean;
+  autoApproveEdits?: boolean;
 }
 
 export type TodoStatus = "pending" | "in_progress" | "done";
@@ -286,6 +287,7 @@ export async function runAgent(input: AgentLoopInput): Promise<string> {
     maxToolOutputChars: config.agent.maxToolOutputChars,
     commandTimeoutMs: config.verify.timeoutMs,
     verifyAfterEdit: hooksEnabled ? config.verify.afterEdit : [],
+    autoApproveEdits: input.autoApproveEdits ?? false,
   };
   const projectRules = rulesEnabled ? await loadProjectRules(projectRoot) : null;
   if (projectRules) {

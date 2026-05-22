@@ -3,6 +3,7 @@ import { configToPermissionPolicy, loadConfig } from "../config.js";
 import { loadProjectRules } from "./project-rules.js";
 import {
   createSessionTrace,
+  recordModelMessage,
   recordTodoEvent,
   recordToolCall,
   recordToolResult,
@@ -328,6 +329,9 @@ export async function runAgent(input: AgentLoopInput): Promise<string> {
         role: "assistant",
         content,
       });
+      recordModelMessage(trace, content, {
+        maxTextLength: config.agent.maxToolOutputChars,
+      });
 
       let response: ModelResponse;
       try {
@@ -378,6 +382,7 @@ export async function runAgent(input: AgentLoopInput): Promise<string> {
       const result = await runTool(response.tool, response.args, toolContext);
       recordToolResult(trace, response.tool, response.args, result, {
         source: "model",
+        maxTextLength: config.agent.maxToolOutputChars,
       });
       console.log(`[tool_result] success=${result.success}`);
 

@@ -6,6 +6,7 @@ import {
   type PermissionPolicy,
 } from "../config.js";
 import { confirm } from "../permissions/confirm.js";
+import { capAndRedact } from "../redaction.js";
 import { resolveProjectRoot } from "./path-safety.js";
 import type { ToolContext, ToolResult } from "./read-file.js";
 
@@ -84,14 +85,6 @@ export function decideCommand(
   return "confirm";
 }
 
-function capOutput(value: string, maxLength: number): string {
-  if (value.length <= maxLength) {
-    return value;
-  }
-
-  return `${value.slice(0, maxLength)}\n... output truncated`;
-}
-
 function formatOutput(result: CommandResult): string {
   return JSON.stringify(result, null, 2);
 }
@@ -140,8 +133,8 @@ function runCommand(
           command,
           decision,
           exitCode,
-          stdout: capOutput(stdout, maxOutputChars),
-          stderr: capOutput(stderr, maxOutputChars),
+          stdout: capAndRedact(stdout, maxOutputChars, "\n... output truncated"),
+          stderr: capAndRedact(stderr, maxOutputChars, "\n... output truncated"),
           timedOut,
           error:
             exitCode === 0

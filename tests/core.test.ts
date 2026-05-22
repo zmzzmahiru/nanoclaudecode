@@ -12,6 +12,7 @@ import { runAfterEditHook } from "../src/agent/hooks.js";
 import { runAgent } from "../src/agent/loop.js";
 import {
   createSessionTrace,
+  recordToolCall,
   recordToolResult,
 } from "../src/agent/session-trace.js";
 import {
@@ -535,6 +536,180 @@ describe("filesystem tools", () => {
 });
 
 describe("session trace", () => {
+  it("records tool_call and tool_result steps", () => {
+    const trace = createSessionTrace({ userTask: "test" });
+
+    recordToolCall(trace, "grep", { pattern: "NanoClaude", path: "src" });
+    recordToolResult(trace, "grep", { pattern: "NanoClaude", path: "src" }, {
+      success: true,
+      output: "src/index.ts:1:NanoClaude",
+      error: null,
+    });
+
+    expect(trace.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "tool_call",
+          tool: "grep",
+        }),
+        expect.objectContaining({
+          type: "tool_result",
+          tool: "grep",
+          success: true,
+        }),
+      ]),
+    );
+  });
+
+  it("records bash permission decisions", () => {
+    const trace = createSessionTrace({ userTask: "test" });
+
+    recordToolResult(trace, "bash", { command: "sudo npm test" }, {
+      success: false,
+      output: JSON.stringify({
+        command: "sudo npm test",
+        decision: "deny",
+        exitCode: null,
+        stdout: "",
+        stderr: "",
+        timedOut: false,
+        error: "Command denied by policy.",
+      }),
+      error: "Command denied by policy.",
+    });
+
+    expect(trace.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "permission_decision",
+          command: "sudo npm test",
+          decision: "deny",
+          allowed: false,
+          error: "Command denied by policy.",
+        }),
+      ]),
+    );
+  });
+
+  it("records edit_applied after a successful edit", () => {
+    const trace = createSessionTrace({ userTask: "test" });
+
+    recordToolResult(trace, "edit_file", { path: "README.md" }, {
+      success: true,
+      output: JSON.stringify({
+        path: "README.md",
+        applied: true,
+        reason: "update docs",
+        diff: "--- README.md\n+++ README.md",
+        verification: { ran: false, results: [], passed: true },
+        error: null,
+      }),
+      error: null,
+    });
+
+    expect(trace.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "edit_applied",
+          path: "README.md",
+          applied: true,
+          outcome: "applied",
+          reason: "update docs",
+          error: null,
+        }),
+      ]),
+    );
+  });
+
+  it("records verification events after edit hooks run", () => {
+    const trace = createSessionTrace({ userTask: "test" });
+
+    recordToolResult(trace, "edit_file", { path: "README.md" }, {
+      success: true,
+      output: JSON.stringify({
+        path: "README.md",
+        applied: true,
+        reason: "update docs",
+        diff: "",
+        verification: {
+          ran: true,
+          passed: true,
+          results: [
+            {
+              command: "npm test",
+              decision: "allow",
+              exitCode: 0,
+              stdout: "passed",
+              stderr: "",
+              timedOut: false,
+              error: null,
+            },
+          ],
+        },
+        error: null,
+      }),
+      error: null,
+    });
+
+    expect(trace.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "verification",
+          command: "npm test",
+          decision: "allow",
+          exitCode: 0,
+          timedOut: false,
+          passed: true,
+          stdout: "passed",
+        }),
+      ]),
+    );
+  });
+
+  it("records verification failures from edit hooks", () => {
+    const trace = createSessionTrace({ userTask: "test" });
+
+    recordToolResult(trace, "edit_file", { path: "README.md" }, {
+      success: false,
+      output: JSON.stringify({
+        path: "README.md",
+        applied: true,
+        reason: "update docs",
+        diff: "",
+        verification: {
+          ran: true,
+          passed: false,
+          results: [
+            {
+              command: "npm run build",
+              decision: "allow",
+              exitCode: 2,
+              stdout: "",
+              stderr: "bad",
+              timedOut: false,
+              error: "Command exited with code 2.",
+            },
+          ],
+        },
+        error: "Verification failed for command: npm run build",
+      }),
+      error: "Verification failed for command: npm run build",
+    });
+
+    expect(trace.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "verification",
+          command: "npm run build",
+          exitCode: 2,
+          passed: false,
+          stderr: "bad",
+          error: "Command exited with code 2.",
+        }),
+      ]),
+    );
+  });
+
   it("redacts .env output and API-key-like content", () => {
     const trace = createSessionTrace({ userTask: "test" });
 
@@ -562,6 +737,53 @@ describe("session trace", () => {
     expect(trace.toolResults[0]?.output).toBe("<redacted sensitive file output>");
     expect(trace.toolResults[1]?.output).toContain("LLM_API_KEY=<redacted>");
     expect(trace.toolResults[1]?.output).not.toContain("secret-value");
+  });
+
+  it("redacts obvious API keys, tokens, and password values in trace steps", () => {
+    const trace = createSessionTrace({ userTask: "test" });
+
+    recordToolResult(trace, "bash", { command: "node secret.js" }, {
+      success: true,
+      output: JSON.stringify({
+        command: "node secret.js",
+        decision: "allow",
+        exitCode: 0,
+        stdout:
+          "LLM_API_KEY=abc123\nAuthorization: Bearer token-secret-1234567890\nPASSWORD=hunter2\nvalue=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN1234",
+        stderr: "",
+        timedOut: false,
+        error: null,
+      }),
+      error: null,
+    });
+
+    const serialized = JSON.stringify(trace);
+    expect(serialized).toContain("LLM_API_KEY=<redacted>");
+    expect(serialized).toContain("Bearer <redacted>");
+    expect(serialized).toContain("PASSWORD=<redacted>");
+    expect(serialized).toContain("<redacted-secret-like-value>");
+    expect(serialized).not.toContain("hunter2");
+    expect(serialized).not.toContain("token-secret-1234567890");
+  });
+
+  it("truncates long tool output in trace", () => {
+    const trace = createSessionTrace({ userTask: "test" });
+
+    recordToolResult(
+      trace,
+      "grep",
+      { pattern: "x", path: "." },
+      {
+        success: true,
+        output: "x".repeat(80),
+        error: null,
+      },
+      { maxTextLength: 20 },
+    );
+
+    expect(trace.toolResults[0]?.output).toBe(
+      "x".repeat(20) + "\n... trace content truncated",
+    );
   });
 });
 

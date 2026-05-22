@@ -3,8 +3,17 @@ import path from "node:path";
 
 import type { Todo } from "./loop.js";
 import type { ToolResult } from "../tools/index.js";
+import { capAndRedact } from "../redaction.js";
 
 export type SessionStatus = "success" | "stopped" | "error";
+export type AgentStepType =
+  | "model_message"
+  | "tool_call"
+  | "tool_result"
+  | "permission_decision"
+  | "edit_applied"
+  | "verification"
+  | "final";
 
 export interface SessionTrace {
   sessionId: string;
@@ -15,9 +24,16 @@ export interface SessionTrace {
   todoEvents: TodoTraceEvent[];
   toolCalls: ToolCallTrace[];
   toolResults: ToolResultTrace[];
+  steps: AgentStep[];
   finalAnswer?: string;
   status?: SessionStatus;
   error?: string;
+}
+
+export interface AgentStep {
+  at: string;
+  type: AgentStepType;
+  [key: string]: unknown;
 }
 
 export interface TodoTraceEvent {
@@ -48,12 +64,6 @@ export interface ToolResultTrace {
 const TRACE_DIR = ".nanoclaude/sessions";
 const MAX_TRACE_TEXT_LENGTH = 4_000;
 const MAX_FINAL_ANSWER_LENGTH = 12_000;
-const SECRET_ENV_NAMES = [
-  "LLM_API_KEY",
-  "OPENAI_API_KEY",
-  "ANTHROPIC_API_KEY",
-  "DEEPSEEK_API_KEY",
-];
 
 export function createSessionTrace(input: {
   userTask: string;
@@ -71,6 +81,7 @@ export function createSessionTrace(input: {
     todoEvents: [],
     toolCalls: [],
     toolResults: [],
+    steps: [],
   };
 
   if (input.loadedRulesFile) {
@@ -78,6 +89,21 @@ export function createSessionTrace(input: {
   }
 
   return trace;
+}
+
+export function recordModelMessage(
+  trace: SessionTrace,
+  content: string,
+  metadata: { maxTextLength?: number } = {},
+): void {
+  trace.steps.push({
+    at: new Date().toISOString(),
+    type: "model_message",
+    content: capAndRedact(
+      content,
+      metadata.maxTextLength ?? MAX_FINAL_ANSWER_LENGTH,
+    ),
+  });
 }
 
 export function recordTodoEvent(trace: SessionTrace, todo: Todo): void {
@@ -110,6 +136,10 @@ export function recordToolCall(
   }
 
   trace.toolCalls.push(entry);
+  trace.steps.push({
+    type: "tool_call",
+    ...entry,
+  });
 }
 
 export function recordToolResult(
@@ -117,14 +147,19 @@ export function recordToolResult(
   tool: string,
   args: unknown,
   result: ToolResult,
-  metadata: { source?: "model" | "hook"; hookName?: string } = {},
+  metadata: {
+    source?: "model" | "hook";
+    hookName?: string;
+    maxTextLength?: number;
+  } = {},
 ): void {
+  const maxTextLength = metadata.maxTextLength ?? MAX_TRACE_TEXT_LENGTH;
   const entry: ToolResultTrace = {
     at: new Date().toISOString(),
     tool,
     success: result.success,
-    output: summarizeToolOutput(tool, args, result.output),
-    error: result.error ? capAndRedact(result.error) : null,
+    output: summarizeToolOutput(tool, args, result.output, maxTextLength),
+    error: result.error ? capAndRedact(result.error, maxTextLength) : null,
   };
 
   if (metadata.source) {
@@ -136,6 +171,36 @@ export function recordToolResult(
   }
 
   trace.toolResults.push(entry);
+  trace.steps.push({
+    type: "tool_result",
+    ...entry,
+  });
+  recordDerivedToolSteps(trace, tool, result.output, maxTextLength);
+}
+
+export function recordFinal(
+  trace: SessionTrace,
+  input: {
+    status: SessionStatus;
+    finalAnswer?: string;
+    error?: string;
+  },
+): void {
+  const step: AgentStep = {
+    at: new Date().toISOString(),
+    type: "final",
+    status: input.status,
+  };
+
+  if (input.finalAnswer) {
+    step.content = capAndRedact(input.finalAnswer, MAX_FINAL_ANSWER_LENGTH);
+  }
+
+  if (input.error) {
+    step.error = capAndRedact(input.error);
+  }
+
+  trace.steps.push(step);
 }
 
 export async function saveSessionTrace(
@@ -157,6 +222,8 @@ export async function saveSessionTrace(
   if (input.error) {
     trace.error = capAndRedact(input.error);
   }
+
+  recordFinal(trace, input);
 
   const sessionDirectory = path.join(projectRoot, TRACE_DIR);
   await mkdir(sessionDirectory, { recursive: true });
@@ -192,12 +259,17 @@ function summarizeArgs(value: unknown, key?: string): unknown {
   return value;
 }
 
-function summarizeToolOutput(tool: string, args: unknown, output: string): string {
+function summarizeToolOutput(
+  tool: string,
+  args: unknown,
+  output: string,
+  maxLength: number = MAX_TRACE_TEXT_LENGTH,
+): string {
   if (tool === "read_file" && isSensitiveFileArg(args)) {
     return "<redacted sensitive file output>";
   }
 
-  return capAndRedact(output);
+  return capAndRedact(output, maxLength);
 }
 
 function isSensitiveFileArg(args: unknown): boolean {
@@ -210,34 +282,137 @@ function isSensitiveFileArg(args: unknown): boolean {
   return normalized === ".env" || normalized.endsWith("/.env");
 }
 
-function capAndRedact(
-  value: string,
-  maxLength: number = MAX_TRACE_TEXT_LENGTH,
-): string {
-  const redacted = redactSecrets(value);
-
-  if (redacted.length <= maxLength) {
-    return redacted;
+function recordDerivedToolSteps(
+  trace: SessionTrace,
+  tool: string,
+  output: string,
+  maxTextLength: number,
+): void {
+  if (tool === "bash") {
+    const commandResult = parseJsonObject(output);
+    if (commandResult) {
+      recordPermissionDecision(trace, commandResult, maxTextLength);
+    }
+    return;
   }
 
-  return `${redacted.slice(0, maxLength)}\n... trace content truncated`;
-}
+  if (tool !== "edit_file") {
+    return;
+  }
 
-function redactSecrets(value: string): string {
-  let redacted = value;
+  const editResult = parseJsonObject(output);
+  if (!editResult) {
+    return;
+  }
 
-  for (const envName of SECRET_ENV_NAMES) {
-    const secret = process.env[envName];
-    if (secret && secret.length > 3) {
-      redacted = redacted.split(secret).join("<redacted>");
+  const applied = editResult.applied === true;
+  const error =
+    typeof editResult.error === "string" ? capAndRedact(editResult.error) : null;
+  const outcome = applied
+    ? "applied"
+    : error === "Edit rejected by user."
+      ? "rejected"
+      : error
+        ? "failed"
+        : "no_op";
+
+  trace.steps.push({
+    at: new Date().toISOString(),
+    type: "edit_applied",
+    path: typeof editResult.path === "string" ? editResult.path : "",
+    applied,
+    outcome,
+    reason:
+      typeof editResult.reason === "string"
+        ? capAndRedact(editResult.reason)
+        : "",
+    error,
+  });
+
+  const verification = getRecord(editResult.verification);
+  const results = Array.isArray(verification?.results)
+    ? verification.results
+    : [];
+
+  for (const verificationResult of results) {
+    const record = getRecord(verificationResult);
+    if (record) {
+      recordPermissionDecision(trace, record, maxTextLength);
+      recordVerification(trace, record, maxTextLength);
     }
   }
+}
 
-  redacted = redacted.replace(
-    /\b([A-Z0-9_]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD)[A-Z0-9_]*)\s*=\s*[^\s]+/gi,
-    "$1=<redacted>",
-  );
-  redacted = redacted.replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/g, "Bearer <redacted>");
+function recordPermissionDecision(
+  trace: SessionTrace,
+  commandResult: Record<string, unknown>,
+  maxTextLength: number,
+): void {
+  const decision = readString(commandResult.decision);
+  const error = readNullableString(commandResult.error, maxTextLength);
 
-  return redacted;
+  trace.steps.push({
+    at: new Date().toISOString(),
+    type: "permission_decision",
+    command: readString(commandResult.command),
+    decision,
+    allowed: decision !== "deny" && error !== "Command rejected by user.",
+    exitCode: readNullableNumber(commandResult.exitCode),
+    timedOut: commandResult.timedOut === true,
+    error,
+  });
+}
+
+function recordVerification(
+  trace: SessionTrace,
+  verificationResult: Record<string, unknown>,
+  maxTextLength: number,
+): void {
+  const exitCode = readNullableNumber(verificationResult.exitCode);
+  const timedOut = verificationResult.timedOut === true;
+  const error = readNullableString(verificationResult.error, maxTextLength);
+  const passed = exitCode === 0 && !timedOut && error === null;
+
+  trace.steps.push({
+    at: new Date().toISOString(),
+    type: "verification",
+    command: readString(verificationResult.command),
+    decision: readString(verificationResult.decision),
+    exitCode,
+    timedOut,
+    passed,
+    stdout: readString(verificationResult.stdout, maxTextLength),
+    stderr: readString(verificationResult.stderr, maxTextLength),
+    error,
+  });
+}
+
+function parseJsonObject(value: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return getRecord(parsed);
+  } catch {
+    return null;
+  }
+}
+
+function getRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function readString(value: unknown, maxTextLength = MAX_TRACE_TEXT_LENGTH): string {
+  return typeof value === "string" ? capAndRedact(value, maxTextLength) : "";
+}
+
+function readNullableString(
+  value: unknown,
+  maxTextLength = MAX_TRACE_TEXT_LENGTH,
+): string | null {
+  return typeof value === "string" ? capAndRedact(value, maxTextLength) : null;
+}
+
+function readNullableNumber(value: unknown): number | null {
+  return typeof value === "number" ? value : null;
 }
